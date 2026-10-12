@@ -31,6 +31,8 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - deteccion de mods desactualizados o retirados del Workshop
 - historial de listas de mods, con comparacion y restauracion
 - limpieza de descriptores colgados y restos sin descriptor
+- recuperacion de los mods que el launcher lista y no estan en disco,
+  volviendolos a descargar del Workshop por su id
 - desinstalar mods: del disco, del registro y de todos los playsets a la vez
 - deteccion de conflictos: que archivos define mas de un mod y cual gana
 - gestion de DLC por playset
@@ -347,6 +349,7 @@ src/loadstone/
     search.py           busqueda dentro de los archivos de los mods
     history.py          instantaneas de la lista de mods
     cleanup.py          restos en la carpeta mod/
+    repair.py           mods registrados cuyo contenido ya no esta
     uninstall.py        quitar un mod del disco, del registro y de las listas
     conflicts.py        que archivos define mas de un mod
     dlc.py              los DLC instalados y su estado

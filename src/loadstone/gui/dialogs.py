@@ -38,6 +38,7 @@ from ..core.dlc import scan_dlc
 from ..core.history import History, diff_snapshots, restore_into
 from ..core.install import InstallError, install_mod
 from ..core.models import GameProfile, Mod, Playset
+from ..core.repair import RepairPlan
 from ..core.search import SearchOptions, SearchScope, search_mods, select_scope
 from ..core.steamcmd import SteamCmd
 from ..core.uninstall import UninstallPlan, execute_uninstall, plan_uninstall
@@ -57,6 +58,7 @@ __all__ = [
     "DlcDialog",
     "DownloadDialog",
     "HistoryDialog",
+    "RepairDialog",
     "SearchDialog",
     "UninstallDialog",
     "UpdatesDialog",
@@ -1053,3 +1055,103 @@ class UninstallDialog(_BaseDialog):
             )
         self._on_done()
         self.accept()
+
+
+class RepairDialog(_BaseDialog):
+    """Vuelve a descargar los mods que el launcher lista y no estan en disco.
+
+    No pregunta que descargar: lo que falta ya lo dijo el diagnostico, y los
+    ids estaban en la propia base del launcher. Lo unico que hay que decidir
+    aqui es si se hace, y eso cabe en un boton.
+    """
+
+    def __init__(
+        self,
+        parent: Any,
+        game: GameProfile,
+        backend: Backend,
+        plan: RepairPlan,
+        on_repaired: Callable[[], None],
+    ) -> None:
+        super().__init__(parent, "Recuperar los mods que faltan", 720, 460)
+        self._game = game
+        self._backend = backend
+        self._plan = plan
+        self._on_repaired = on_repaired
+
+        layout = QVBoxLayout(self)
+        resumen = QLabel(
+            f"El launcher lista {plan.total} mod(s) cuyo contenido no esta en disco. "
+            f"{len(plan.recuperables)} tienen id del Workshop y se pueden volver a "
+            "descargar."
+        )
+        resumen.setWordWrap(True)
+        layout.addWidget(resumen)
+
+        self.tabla = QTreeWidget()
+        self.tabla.setHeaderLabels(["Mod", "Workshop", "Estado"])
+        self.tabla.setRootIsDecorated(False)
+        self.tabla.setColumnWidth(0, 320)
+        self.tabla.setColumnWidth(1, 110)
+        self.tabla.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for mod in plan.recuperables:
+            self.tabla.addTopLevelItem(
+                QTreeWidgetItem([mod.name, mod.steam_id or "-", "se descargara"])
+            )
+        for mod in plan.perdidos:
+            fila = QTreeWidgetItem([mod.name, "-", "sin id: no se puede recuperar"])
+            fila.setForeground(2, QBrush(_ambar()))
+            self.tabla.addTopLevelItem(fila)
+        layout.addWidget(self.tabla, 1)
+
+        if plan.perdidos:
+            nota = QLabel(
+                f"Los {len(plan.perdidos)} sin id se instalaron a mano y no dejaron "
+                "rastro de su origen. Habra que volver a ponerlos desde donde "
+                "salieran, o quitarlos del registro con 'Limpiar restos'."
+            )
+            nota.setWordWrap(True)
+            nota.setStyleSheet(_apagado())
+            layout.addWidget(nota)
+
+        aviso = QLabel(
+            "De los juegos soportados solo Stellaris permite la descarga anonima. "
+            "En los demas SteamCMD pedira por consola una cuenta que tenga el juego."
+        )
+        aviso.setWordWrap(True)
+        aviso.setStyleSheet(_apagado())
+        layout.addWidget(aviso)
+        layout.addWidget(self.progress)
+
+        self.descargar_btn = QPushButton(f"Descargar los {len(plan.recuperables)}")
+        self.descargar_btn.setEnabled(plan.hay_algo_que_hacer)
+        self.descargar_btn.clicked.connect(self._descargar)
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        botones.addButton(self.descargar_btn, QDialogButtonBox.ButtonRole.AcceptRole)
+        botones.rejected.connect(self.reject)
+        layout.addWidget(botones)
+
+    def _descargar(self) -> None:
+        ids = self._plan.ids
+        if not ids:
+            return
+        juego, backend = self._game, self._backend
+        self.descargar_btn.setEnabled(False)
+        self.run_task(
+            lambda: download_and_install(juego, backend, ids),
+            self._descargado,
+            busy_text=f"descargando {len(ids)} mods con SteamCMD...",
+        )
+
+    def _descargado(self, informe: list[tuple[str, str]]) -> None:
+        correctos = sum(1 for _i, estado in informe if estado.startswith("instalado"))
+        fallos = [f"{i}: {estado}" for i, estado in informe if not estado.startswith("instalado")]
+        texto = f"{correctos} de {len(informe)} recuperados."
+        if fallos:
+            texto += "\n\nNo se pudieron bajar:\n" + "\n".join(fallos[:10])
+        QMessageBox.information(self, "Recuperacion terminada", texto)
+        self._on_repaired()
+        if correctos:
+            self.accept()
+        else:
+            self.descargar_btn.setEnabled(True)

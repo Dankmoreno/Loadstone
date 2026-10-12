@@ -496,3 +496,25 @@ def test_el_clic_derecho_conserva_la_seleccion_multiple(ventana, qtbot):
         pos=lista.visualItemRect(lista.topLevelItem(1)).center(),
     )
     assert len(lista.selected_uids()) == 1
+
+
+def test_la_barra_de_reparacion_aparece_cuando_faltan_mods(ventana, mods):
+    """Un diagnostico que puede arreglarse tiene que ofrecer el arreglo."""
+    assert not ventana.repair_bar.isVisibleTo(ventana)
+
+    # El caso real: el launcher los lista y su contenido ya no esta.
+    for mod in ventana.mods.values():
+        mod.on_disk = False
+        mod.in_registry = True
+    ventana.refresh_issues()
+
+    assert ventana.repair_bar.isVisibleTo(ventana)
+    assert "Faltan 2 mods" in ventana.repair_label.text()
+    # Solo 'Mod Uno' tiene steam_id en el fixture.
+    assert ventana.repair_button.text() == "Recuperar 1..."
+    assert "no se pueden recuperar" in ventana.repair_label.text()
+
+
+def test_la_barra_se_esconde_cuando_no_hay_nada_roto(ventana):
+    ventana.refresh_issues()
+    assert not ventana.repair_bar.isVisibleTo(ventana)

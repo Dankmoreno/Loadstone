@@ -51,6 +51,7 @@ from ..core.launch import GameLaunchError, launch_game, open_in_file_manager, re
 from ..core.models import GameProfile, LoadOrderMode, Mod, Playset, PlaysetMod
 from ..core.notes import Notes
 from ..core.playsets import export_playset, import_playset, read_playset_file
+from ..core.repair import RepairPlan, plan_repair
 from ..core.sorting import CycleError, minimal_moves, sort_alphabetical, sort_by_dependencies
 from .assets import svg_path
 from .dialogs import (
@@ -59,6 +60,7 @@ from .dialogs import (
     DlcDialog,
     DownloadDialog,
     HistoryDialog,
+    RepairDialog,
     SearchDialog,
     UninstallDialog,
     UpdatesDialog,
@@ -93,6 +95,7 @@ class MainWindow(QMainWindow):
         self.notes: Notes | None = None
         self.dirty = False
         self._saved_state: list[tuple[str, bool, int]] = []
+        self._repair_plan = RepairPlan()
 
         self._build_ui()
         # Cargar despues de mostrar: escanear la carpeta de mods tarda y
@@ -259,6 +262,21 @@ class MainWindow(QMainWindow):
         fuente.setBold(True)
         self.issues_title.setFont(fuente)
         caja.addWidget(self.issues_title)
+
+        # Barra de reparacion: aparece solo cuando hay algo roto que el
+        # programa sabe arreglar. Un diagnostico que describe un problema
+        # resoluble sin ofrecer la solucion deja el trabajo a medias.
+        self.repair_bar = QWidget()
+        self.repair_bar.setVisible(False)
+        barra = QHBoxLayout(self.repair_bar)
+        barra.setContentsMargins(10, 7, 10, 7)
+        self.repair_label = QLabel()
+        self.repair_label.setWordWrap(True)
+        barra.addWidget(self.repair_label, 1)
+        self.repair_button = QPushButton("Recuperar...")
+        self.repair_button.clicked.connect(self.open_repair)
+        barra.addWidget(self.repair_button)
+        caja.addWidget(self.repair_bar)
 
         self.issue_tree = QTreeWidget()
         self.issue_tree.setHeaderLabels(["Nivel", "Problema"])
@@ -566,6 +584,53 @@ class MainWindow(QMainWindow):
         self.issues_title.setText(
             f"Diagnostico: {errores} errores, {avisos} avisos, {len(issues)} en total"
         )
+        self._refresh_repair_bar()
+
+    def _refresh_repair_bar(self) -> None:
+        """Ensena la barra solo si hay mods que falten y se puedan recuperar."""
+        self._repair_plan = plan_repair(list(self.mods.values()))
+        plan = self._repair_plan
+        if not plan.hay_algo_que_hacer:
+            self.repair_bar.setVisible(False)
+            return
+
+        paleta = current_palette()
+        self.repair_bar.setStyleSheet(
+            f"background: {paleta.superficie_alta};"
+            f"border: 1px solid {paleta.aviso};"
+            "border-radius: 8px;"
+        )
+        perdidos = (
+            f" Otros {len(plan.perdidos)} se instalaron a mano y no se pueden recuperar."
+            if plan.perdidos
+            else ""
+        )
+        self.repair_label.setText(
+            f"Faltan {plan.total} mods en disco: el launcher los lista pero el juego "
+            f"no los encontrara. {len(plan.recuperables)} tienen id del Workshop y se "
+            f"pueden volver a descargar.{perdidos}"
+        )
+        self.repair_button.setText(f"Recuperar {len(plan.recuperables)}...")
+        self.repair_bar.setVisible(True)
+
+    def open_repair(self) -> None:
+        if not self._require_game():
+            return
+        game = self._current_game()
+        assert game is not None and self.backend is not None
+        plan = plan_repair(list(self.mods.values()))
+        if not plan.hay_algo_que_hacer:
+            QMessageBox.information(
+                self, "Nada que recuperar", "No falta ningun mod recuperable."
+            )
+            return
+        RepairDialog(
+            self,
+            game,
+            self.backend,
+            plan,
+            lambda: self._on_game_changed(self.game_box.currentIndex()),
+        ).exec()
 
     def _update_status(self) -> None:
         if self.playset is None:
