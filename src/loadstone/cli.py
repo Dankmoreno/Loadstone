@@ -24,6 +24,10 @@ from .core.install import InstallError, install_mod
 from .core.launch import GameLaunchError, launch_game, read_launch_target
 from .core.logs import get_logger, install_excepthook, setup_logging
 from .core.models import GameProfile, LoadOrderMode, Mod, Playset, PlaysetMod
+from .core.quarantine import DIAS_EN_CUARENTENA
+from .core.quarantine import list_entries as list_quarantine
+from .core.quarantine import purge as purge_quarantine
+from .core.quarantine import restore as restore_quarantine
 from .core.search import SearchOptions, SearchScope, search_mods, select_scope
 from .core.sorting import CycleError, minimal_moves, sort_alphabetical, sort_by_dependencies
 from .core.steamcmd import SteamCmd, SteamCmdError
@@ -614,6 +618,57 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
     return 0 if not errores else 1
 
 
+def cmd_quarantine(args: argparse.Namespace) -> int:
+    """Lista, devuelve o vacia lo que `uninstall` aparto.
+
+    No pide `--game`: la papelera es una sola para toda la maquina, porque lo
+    apartado ya guarda su ruta original y esa dice a que juego vuelve.
+    """
+    entradas = list_quarantine()
+
+    if args.empty:
+        caidas = purge_quarantine(dias=0)
+        print(f"{caidas} entrada(s) borradas definitivamente")
+        return 0
+
+    if args.restore:
+        por_nombre = {e.nombre.lower(): e for e in entradas}
+        elegidas = []
+        for texto in args.restore:
+            entrada = por_nombre.get(texto.lower()) or next(
+                (e for e in entradas if texto.lower() in e.nombre.lower()), None
+            )
+            if entrada is None:
+                raise SystemExit(f"no hay nada apartado que case con '{texto}'")
+            elegidas.append(entrada)
+
+        errores: list[str] = []
+        for entrada in elegidas:
+            errores.extend(restore_quarantine(entrada))
+        if errores:
+            for error in errores[:10]:
+                print(f"  {error}", file=sys.stderr)
+            return 1
+        print(f"{len(elegidas)} mod(s) devueltos a su sitio")
+        print("Tendras que volver a anadirlos al playset.")
+        return 0
+
+    if not entradas:
+        print("la papelera esta vacia")
+        return 0
+
+    total = sum(e.size for e in entradas)
+    print(f"{len(entradas)} mod(s) apartados, {total / 1024 / 1024:.1f} MB en total")
+    print(f"se purgan solos a los {DIAS_EN_CUARENTENA} dias")
+    print()
+    print(f"{'hace':>8}  {'tamano':>9}  mod")
+    print("-" * 70)
+    for entrada in entradas:
+        dias = "hoy" if entrada.dias == 0 else f"{entrada.dias}d"
+        print(f"{dias:>8}  {entrada.size / 1024 / 1024:7.1f} MB  {entrada.nombre}")
+    return 0
+
+
 def cmd_clean(args: argparse.Namespace) -> int:
     game = _pick_game(args)
     backend = get_backend(game)
@@ -932,6 +987,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     uninstall.add_argument("--write", action="store_true", help="borrar de verdad")
     uninstall.set_defaults(func=cmd_uninstall)
+
+    cuarentena = subparsers.add_parser(
+        "quarantine",
+        parents=[common],
+        help="lo que `uninstall` aparto, y como devolverlo",
+    )
+    cuarentena.add_argument(
+        "--restore",
+        nargs="+",
+        metavar="MOD",
+        help="devuelve a su sitio los mods cuyo nombre case",
+    )
+    cuarentena.add_argument(
+        "--empty", action="store_true", help="borra definitivamente todo lo apartado"
+    )
+    cuarentena.set_defaults(func=cmd_quarantine)
 
     clean = with_game("clean", "limpia descriptores colgados y restos en mod/")
     clean.add_argument(

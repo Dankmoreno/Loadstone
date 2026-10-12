@@ -33,7 +33,8 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - limpieza de descriptores colgados y restos sin descriptor
 - recuperacion de los mods que el launcher lista y no estan en disco,
   volviendolos a descargar del Workshop por su id
-- desinstalar mods: del disco, del registro y de todos los playsets a la vez
+- desinstalar mods: del disco, del registro y de todos los playsets a la vez,
+  con papelera de 14 dias para deshacerlo
 - deteccion de conflictos: que archivos define mas de un mod y cual gana
 - gestion de DLC por playset
 - arrancar el juego desde la aplicacion
@@ -256,7 +257,9 @@ El orden de esas tres operaciones no es casual:
    cosa y la otra el launcher veria listas apuntando a un mod inexistente,
    que es justo el estado roto que `Limpiar restos` tiene luego que reparar.
    Si los playsets no se pueden guardar, no se borra nada.
-2. **El disco despues**, que es lo unico irreversible.
+2. **El disco despues.** El contenido no se borra: se aparta a una papelera
+   en la cache, con un manifiesto que recuerda de donde salio cada cosa, y
+   de ahi vuelve a su ruta exacta. A los 14 dias se purga solo.
 3. **El registro al final**, porque mientras exista su fila el mod sigue
    teniendo nombre en los mensajes de error.
 
@@ -359,6 +362,7 @@ src/loadstone/
     history.py          instantaneas de la lista de mods
     cleanup.py          restos en la carpeta mod/
     repair.py           mods registrados cuyo contenido ya no esta
+    quarantine.py       papelera de lo desinstalado, para poder deshacerlo
     uninstall.py        quitar un mod del disco, del registro y de las listas
     conflicts.py        que archivos define mas de un mod
     dlc.py              los DLC instalados y su estado

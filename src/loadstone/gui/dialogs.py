@@ -38,6 +38,13 @@ from ..core.dlc import scan_dlc
 from ..core.history import History, diff_snapshots, restore_into
 from ..core.install import InstallError, install_mod
 from ..core.models import GameProfile, Mod, Playset
+from ..core.quarantine import (
+    DIAS_EN_CUARENTENA,
+    QuarantineEntry,
+    list_entries,
+    purge,
+    restore,
+)
 from ..core.repair import RepairPlan
 from ..core.search import SearchOptions, SearchScope, search_mods, select_scope
 from ..core.steamcmd import SteamCmd
@@ -58,6 +65,7 @@ __all__ = [
     "DlcDialog",
     "DownloadDialog",
     "HistoryDialog",
+    "QuarantineDialog",
     "RepairDialog",
     "SearchDialog",
     "UninstallDialog",
@@ -1155,3 +1163,130 @@ class RepairDialog(_BaseDialog):
             self.accept()
         else:
             self.descargar_btn.setEnabled(True)
+
+
+class QuarantineDialog(_BaseDialog):
+    """La papelera: lo desinstalado que todavia se puede devolver a su sitio."""
+
+    def __init__(self, parent: Any, on_restored: Callable[[], None]) -> None:
+        super().__init__(parent, "Papelera de mods", 760, 480)
+        self._on_restored = on_restored
+        self._entradas: list[QuarantineEntry] = []
+
+        layout = QVBoxLayout(self)
+        self.resumen = QLabel()
+        self.resumen.setWordWrap(True)
+        layout.addWidget(self.resumen)
+
+        self.tabla = QTreeWidget()
+        self.tabla.setHeaderLabels(["Mod", "Desinstalado hace", "Tamano"])
+        self.tabla.setRootIsDecorated(False)
+        self.tabla.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.tabla.setColumnWidth(0, 360)
+        self.tabla.setColumnWidth(1, 140)
+        self.tabla.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.tabla, 1)
+
+        nota = QLabel(
+            f"Lo que lleve mas de {DIAS_EN_CUARENTENA} dias aqui se borra solo. "
+            "Un mod del Workshop siempre se puede volver a bajar; uno traducido a "
+            "mano o con parches propios, no."
+        )
+        nota.setWordWrap(True)
+        nota.setStyleSheet(_apagado())
+        layout.addWidget(nota)
+        layout.addWidget(self.progress)
+
+        fila = QHBoxLayout()
+        self.restaurar_btn = QPushButton("Devolver a su sitio")
+        self.restaurar_btn.setEnabled(False)
+        self.restaurar_btn.clicked.connect(self._restaurar)
+        fila.addWidget(self.restaurar_btn)
+        self.vaciar_btn = QPushButton("Vaciar la papelera")
+        self.vaciar_btn.clicked.connect(self._vaciar)
+        fila.addWidget(self.vaciar_btn)
+        fila.addStretch(1)
+        layout.addLayout(fila)
+
+        self.tabla.itemSelectionChanged.connect(
+            lambda: self.restaurar_btn.setEnabled(bool(self.tabla.selectedItems()))
+        )
+
+        botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        botones.rejected.connect(self.reject)
+        layout.addWidget(botones)
+
+        self._cargar()
+
+    def _cargar(self) -> None:
+        self.tabla.clear()
+        self.run_task(list_entries, self._mostrar, busy_text="midiendo la papelera...")
+
+    def _mostrar(self, entradas: list[QuarantineEntry]) -> None:
+        self._entradas = entradas
+        if not entradas:
+            self.resumen.setText("La papelera esta vacia.")
+            self.vaciar_btn.setEnabled(False)
+            return
+
+        total = sum(e.size for e in entradas)
+        self.resumen.setText(
+            f"{len(entradas)} mod(s) apartados, {total / 1024 / 1024:.1f} MB en total."
+        )
+        self.vaciar_btn.setEnabled(True)
+        for indice, entrada in enumerate(entradas):
+            cuando = "hoy" if entrada.dias == 0 else f"{entrada.dias} dia(s)"
+            fila = QTreeWidgetItem(
+                [entrada.nombre, cuando, f"{entrada.size / 1024 / 1024:.1f} MB"]
+            )
+            fila.setData(0, Qt.ItemDataRole.UserRole, indice)
+            if entrada.dias >= DIAS_EN_CUARENTENA - 3:
+                fila.setForeground(1, QBrush(_ambar()))
+                fila.setToolTip(1, "A punto de purgarse")
+            self.tabla.addTopLevelItem(fila)
+
+    def _seleccionadas(self) -> list[QuarantineEntry]:
+        return [
+            self._entradas[item.data(0, Qt.ItemDataRole.UserRole)]
+            for item in self.tabla.selectedItems()
+        ]
+
+    def _restaurar(self) -> None:
+        elegidas = self._seleccionadas()
+        if not elegidas:
+            return
+        self.restaurar_btn.setEnabled(False)
+
+        def trabajo() -> list[str]:
+            errores: list[str] = []
+            for entrada in elegidas:
+                errores.extend(restore(entrada))
+            return errores
+
+        self.run_task(trabajo, self._restaurado, busy_text="devolviendo a su sitio...")
+
+    def _restaurado(self, errores: list[str]) -> None:
+        if errores:
+            QMessageBox.warning(
+                self, "No se pudo devolver todo", "\n".join(errores[:10])
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Hecho",
+                "Devueltos a su sitio. Tendras que volver a anadirlos al playset.",
+            )
+        self._on_restored()
+        self._cargar()
+
+    def _vaciar(self) -> None:
+        if QMessageBox.question(
+            self,
+            "Vaciar la papelera",
+            f"Se borraran los {len(self._entradas)} mods apartados. "
+            "Esto si es definitivo.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.run_task(lambda: purge(dias=0), lambda _n: self._cargar(), busy_text="vaciando...")

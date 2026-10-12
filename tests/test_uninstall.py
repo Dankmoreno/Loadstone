@@ -151,6 +151,7 @@ def test_si_el_playset_no_se_puede_guardar_no_se_borra_nada(tmp_path):
 
 
 def test_un_fallo_de_borrado_no_arrastra_a_los_demas(tmp_path, monkeypatch):
+    """Sin papelera: aqui se comprueba la via que borra de verdad."""
     mod_dir = tmp_path / "mod"
     malo = _mod_instalado(mod_dir, nombre="Malo", uid="uid-1")
     bueno = _mod_instalado(mod_dir, nombre="Bueno", uid="uid-2")
@@ -165,7 +166,7 @@ def test_un_fallo_de_borrado_no_arrastra_a_los_demas(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "unlink", unlink_selectivo)
 
     planes = [plan_uninstall(m, [], mod_dir=mod_dir) for m in (malo, bueno)]
-    hechos, errores = execute_uninstall(planes)
+    hechos, errores = execute_uninstall(planes, quarantine=False)
 
     assert hechos == 1
     assert len(errores) == 1 and "Malo" in errores[0]
@@ -173,7 +174,11 @@ def test_un_fallo_de_borrado_no_arrastra_a_los_demas(tmp_path, monkeypatch):
 
 
 def test_el_registro_no_se_quita_si_el_disco_fallo(tmp_path, monkeypatch):
-    """Sin contenido pero con fila, `cleanup` lo repara. Al reves, no."""
+    """Sin contenido pero con fila, `cleanup` lo repara. Al reves, no.
+
+    Tambien sin papelera: con ella el contenido se mueve y no se borra, asi que
+    un `unlink` roto no es el fallo que se quiere provocar.
+    """
     mod_dir = tmp_path / "mod"
     mod = _mod_instalado(mod_dir)
     monkeypatch.setattr(
@@ -182,7 +187,9 @@ def test_el_registro_no_se_quita_si_el_disco_fallo(tmp_path, monkeypatch):
 
     quitados: list[str] = []
     plan = plan_uninstall(mod, [], mod_dir=mod_dir)
-    hechos, errores = execute_uninstall([plan], unregister=quitados.append)
+    hechos, errores = execute_uninstall(
+        [plan], unregister=quitados.append, quarantine=False
+    )
 
     assert hechos == 0
     assert errores

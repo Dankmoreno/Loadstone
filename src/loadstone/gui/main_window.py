@@ -60,6 +60,7 @@ from .dialogs import (
     DlcDialog,
     DownloadDialog,
     HistoryDialog,
+    QuarantineDialog,
     RepairDialog,
     SearchDialog,
     UninstallDialog,
@@ -338,6 +339,7 @@ class MainWindow(QMainWindow):
         herramientas.addSeparator()
         for texto, atajo, accion in (
             ("&Historial de listas...", "Ctrl+H", self.open_history),
+            ("&Papelera de mods...", None, self.open_quarantine),
             ("&Limpiar restos...", None, self.open_cleanup),
         ):
             accion_qt = QAction(texto, self)
@@ -1162,6 +1164,11 @@ class MainWindow(QMainWindow):
             backend.save_playset,
             backend.unregister_mod,
             terminado,
+        ).exec()
+
+    def open_quarantine(self) -> None:
+        QuarantineDialog(
+            self, lambda: self._on_game_changed(self.game_box.currentIndex())
         ).exec()
 
     def open_cleanup(self) -> None:

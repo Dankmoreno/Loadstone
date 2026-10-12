@@ -29,6 +29,8 @@ from pathlib import Path
 
 from .logs import get_logger
 from .models import Mod, Playset
+from .quarantine import purge as quarantine_purge
+from .quarantine import store as quarantine_store
 
 __all__ = ["UninstallPlan", "execute_uninstall", "plan_uninstall"]
 
@@ -135,11 +137,15 @@ def execute_uninstall(
     save_playset: Callable[[Playset], None] | None = None,
     unregister: Callable[[str], bool] | None = None,
     include_outside: bool = False,
+    quarantine: bool = True,
 ) -> tuple[int, list[str]]:
     """Ejecuta los planes y devuelve `(mods desinstalados, errores)`.
 
     Las dos operaciones que dependen del juego llegan como invocables para que
     este modulo no dependa de ningun backend, igual que en `cleanup`.
+
+    Con `quarantine` el contenido se aparta a la papelera de la cache en vez
+    de borrarse, y se puede devolver a su sitio durante dos semanas.
 
     Un mod solo cuenta como desinstalado si las tres fases salieron bien. Si
     algo falla a mitad se sigue con el resto de la lista en vez de abortar: con
@@ -148,6 +154,11 @@ def execute_uninstall(
     """
     hechos = 0
     errores: list[str] = []
+
+    if quarantine:
+        # La papelera se mantiene sola: nadie se acuerda de vaciarla, y
+        # una que crece sin limite es una copia entera de la biblioteca.
+        quarantine_purge()
 
     # Un mismo playset puede aparecer en varios planes; se reescribe una sola
     # vez, ya sin ninguno de los mods que se van.
@@ -171,6 +182,22 @@ def execute_uninstall(
     for plan in plans:
         fallo = False
         rutas = [*plan.paths, *(plan.outside_paths if include_outside else [])]
+
+        if quarantine:
+            # Apartar en vez de borrar. Un mod del Workshop se vuelve a bajar,
+            # pero uno traducido a mano o con parches propios no vuelve nunca,
+            # y equivocarse de fila cuesta lo mismo en los dos casos.
+            try:
+                quarantine_store(plan.mod, rutas)
+            except OSError as exc:
+                # Ni se borra ni se desregistra. Si no se ha podido apartar,
+                # borrar igualmente convertiria el fallo de la red de seguridad
+                # en la perdida que la red existia para evitar.
+                errores.append(f"{plan.mod.name}: no se pudo apartar ({exc})")
+                continue
+            # Apartar mueve: lo que quede aqui es lo que no llego a moverse.
+            rutas = [r for r in rutas if r.exists()]
+
         for ruta in rutas:
             try:
                 if ruta.is_dir():

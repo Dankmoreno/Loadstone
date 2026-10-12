@@ -146,3 +146,44 @@ def test_se_puede_nombrar_por_uid_exacto(entorno, capsys):
 def test_el_mismo_mod_nombrado_dos_veces_cuenta_una(entorno, capsys):
     main(["uninstall", "--game", "stellaris", "a", "Alpha"])
     assert "1 mod(s) a desinstalar" in capsys.readouterr().out
+
+
+def test_el_ciclo_completo_desinstalar_listar_y_devolver(entorno, capsys, tmp_path):
+    """Lo que de verdad importa: que se pueda deshacer desde la consola."""
+    _juego, _backend, mods, _playset = entorno
+
+    main(["uninstall", "--game", "stellaris", "Alpha", "--write"])
+    assert not mods[0].folder.exists()
+    capsys.readouterr()
+
+    main(["quarantine"])
+    listado = capsys.readouterr().out
+    assert "1 mod(s) apartados" in listado
+    assert "Alpha Mod" in listado
+
+    main(["quarantine", "--restore", "Alpha"])
+    devuelto = capsys.readouterr().out
+    assert "1 mod(s) devueltos" in devuelto
+    assert (mods[0].folder / "datos.txt").exists()
+
+    main(["quarantine"])
+    assert "la papelera esta vacia" in capsys.readouterr().out
+
+
+def test_devolver_algo_que_no_esta_apartado_falla(entorno):
+    with pytest.raises(SystemExit) as fallo:
+        main(["quarantine", "--restore", "no existe"])
+    assert "no hay nada apartado" in str(fallo.value)
+
+
+def test_vaciar_la_papelera_es_definitivo(entorno, capsys):
+    _juego, _backend, mods, _playset = entorno
+    main(["uninstall", "--game", "stellaris", "Alpha", "--write"])
+    capsys.readouterr()
+
+    main(["quarantine", "--empty"])
+    assert "1 entrada(s) borradas" in capsys.readouterr().out
+
+    main(["quarantine"])
+    assert "la papelera esta vacia" in capsys.readouterr().out
+    assert not mods[0].folder.exists()
