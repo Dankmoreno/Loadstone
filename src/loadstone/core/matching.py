@@ -18,7 +18,7 @@ from rapidfuzz import fuzz, process
 
 from .models import Mod
 
-__all__ = ["dependency_index", "normalize", "suggest_similar"]
+__all__ = ["dependency_index", "normalize", "required_mods", "suggest_similar"]
 
 # Calibrado contra una instalacion de 213 mods. Por debajo de 70 empareja
 # cosas que solo comparten vocabulario generico ("expanded", "events"). Por
@@ -52,6 +52,45 @@ def dependency_index(mods: list[Mod]) -> dict[str, Mod]:
         if mod.registry_id:
             claim(mod.registry_id.rsplit("/", 1)[-1].removesuffix(".mod"), mod)
     return index
+
+
+def required_mods(
+    semillas: list[Mod], instalados: list[Mod], ya_presentes: set[str]
+) -> list[Mod]:
+    """Dependencias instaladas que hacen falta y todavia no estan en la lista.
+
+    Se sigue la cadena entera, no un solo nivel: anadir un mod que necesita un
+    parche que a su vez necesita una biblioteca y quedarse a medias deja el
+    mismo error de antes con un nombre distinto.
+
+    Solo devuelve lo que ya esta instalado. Una dependencia que no se tiene no
+    se puede resolver desde aqui: el descriptor solo da un nombre, y buscar ese
+    nombre en el Workshop necesita una clave de API que esta aplicacion no
+    pide. Para esas queda el diagnostico, que ademas sugiere el mod instalado
+    mas parecido.
+
+    El orden de salida es el de descubrimiento, de la dependencia mas cercana a
+    la mas lejana; quien lo use para escribir un playset debe reordenar
+    despues, que para eso esta `sorting`.
+    """
+    indice = dependency_index(instalados)
+    pendientes = list(semillas)
+    vistos = {mod.uid for mod in semillas}
+    encontrados: list[Mod] = []
+
+    while pendientes:
+        actual = pendientes.pop(0)
+        for nombre in actual.dependencies:
+            objetivo = indice.get(normalize(nombre))
+            if objetivo is None or objetivo.uid in vistos:
+                continue
+            vistos.add(objetivo.uid)
+            # Se sigue la cadena aunque ya este en la lista: sus propias
+            # dependencias pueden faltar igualmente.
+            pendientes.append(objetivo)
+            if objetivo.uid not in ya_presentes:
+                encontrados.append(objetivo)
+    return encontrados
 
 
 def suggest_similar(

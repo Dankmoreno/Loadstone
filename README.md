@@ -23,6 +23,8 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - diagnostico: entradas colgadas, mods invisibles, versiones incompatibles,
   dependencias ausentes, desactivadas o cargadas en mal orden
 - ordenacion por dependencias conservando el orden del usuario
+- al anadir un mod, ofrece anadir las dependencias que ya tienes instaladas
+  y no estan en el playset, siguiendo la cadena entera
 - descarga del Workshop de Steam con SteamCMD, incluidas colecciones enteras,
   e importacion de mods desde una carpeta o un zip
 - navegador del Workshop empotrado, con la sesion de Steam iniciada y cola de

@@ -680,3 +680,63 @@ def test_los_dos_mensajes_son_distintos(ventana):
     assert "filtro" not in ventana.active_list._texto_vacia
     # Y las dos listas dicen cosas distintas, porque hacen cosas distintas.
     assert ventana.active_list._texto_vacia != ventana.inactive_list._texto_vacia
+
+
+def test_al_anadir_un_mod_se_ofrecen_sus_dependencias(ventana, monkeypatch):
+    """El diagnostico ya lo sabia; decirlo al final es llegar tarde."""
+    import loadstone.gui.main_window as mw
+
+    # 'Mod Dos' pasa a necesitar 'Mod Uno', que esta instalado.
+    ventana.mods["b"].dependencies = ["Mod Uno"]
+    ventana._move_uids(["a"], to_active=False)  # deja el playset vacio
+    assert ventana.playset.mods == []
+
+    preguntas = []
+
+    class _CajaQueDiceSi(mw.QMessageBox):
+        @staticmethod
+        def question(*a, **k):
+            preguntas.append(a[2])
+            return mw.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(mw, "QMessageBox", _CajaQueDiceSi)
+    ventana._move_uids(["b"], to_active=True)
+
+    assert preguntas and "Mod Uno" in preguntas[0]
+    # La dependencia entra antes que quien la necesita.
+    assert [e.uid for e in ventana.playset.mods] == ["a", "b"]
+
+
+def test_si_se_dice_que_no_solo_entra_lo_pedido(ventana, monkeypatch):
+    import loadstone.gui.main_window as mw
+
+    ventana.mods["b"].dependencies = ["Mod Uno"]
+    ventana._move_uids(["a"], to_active=False)
+
+    class _CajaQueDiceNo(mw.QMessageBox):
+        @staticmethod
+        def question(*a, **k):
+            return mw.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(mw, "QMessageBox", _CajaQueDiceNo)
+    ventana._move_uids(["b"], to_active=True)
+
+    assert [e.uid for e in ventana.playset.mods] == ["b"]
+
+
+def test_sin_dependencias_que_falten_no_se_pregunta_nada(ventana, monkeypatch):
+    import loadstone.gui.main_window as mw
+
+    ventana._move_uids(["a"], to_active=False)
+    preguntas = []
+
+    class _CajaEspia(mw.QMessageBox):
+        @staticmethod
+        def question(*a, **k):
+            preguntas.append(a)
+            return mw.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(mw, "QMessageBox", _CajaEspia)
+    ventana._move_uids(["b"], to_active=True)
+
+    assert preguntas == [], "no debe molestar cuando no hay nada que resolver"

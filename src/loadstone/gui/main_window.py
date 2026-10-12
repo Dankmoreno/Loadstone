@@ -48,6 +48,7 @@ from ..core.conflicts import mod_folder_size
 from ..core.games import detect_games
 from ..core.history import History
 from ..core.launch import GameLaunchError, launch_game, open_in_file_manager, read_launch_target
+from ..core.matching import required_mods
 from ..core.models import GameProfile, LoadOrderMode, Mod, Playset, PlaysetMod
 from ..core.notes import Notes
 from ..core.playsets import export_playset, import_playset, read_playset_file
@@ -742,12 +743,53 @@ class MainWindow(QMainWindow):
         self._set_dirty(True)
         self.refresh_issues()
 
+    def _con_dependencias(self, uids: list[str]) -> list[str]:
+        """Ofrece anadir tambien lo que los mods elegidos necesitan.
+
+        El diagnostico ya sabia decir "X necesita Y, que esta instalado pero no
+        en el playset". Decirlo despues de que el usuario acabe de componer la
+        lista, y dejar que lo arregle a mano uno por uno, es trabajo que el
+        programa puede hacer en el momento exacto en que se produce.
+
+        Se pregunta en vez de anadirlo solo: el playset es del usuario, y un
+        gestor que mete mods que nadie pidio es peor que uno que avisa.
+        """
+        if self.playset is None:
+            return uids
+        semillas = [self.mods[u] for u in uids if u in self.mods]
+        if not semillas:
+            return uids
+
+        presentes = {e.uid for e in self.playset.mods} | set(uids)
+        faltan = required_mods(semillas, list(self.mods.values()), presentes)
+        if not faltan:
+            return uids
+
+        nombres = "\n".join(f"  · {mod.name}" for mod in faltan[:12])
+        if len(faltan) > 12:
+            nombres += f"\n  ... y {len(faltan) - 12} mas"
+        respuesta = QMessageBox.question(
+            self,
+            "Faltan dependencias",
+            f"Lo que vas a anadir necesita {len(faltan)} mod(s) mas que tienes "
+            f"instalados pero no estan en el playset:\n\n{nombres}\n\n"
+            "Anadirlos tambien?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return uids
+        # Primero las dependencias: asi quedan antes en el orden de carga, que
+        # es donde tienen que estar. `Ordenar por dependencias` lo afinara.
+        return [mod.uid for mod in faltan] + uids
+
     def _move_uids(self, uids: list[str], *, to_active: bool) -> None:
         """Mete o saca mods del playset."""
         if self.playset is None or not uids:
             return
         objetivo = [u for u in uids if u]
         if to_active:
+            objetivo = self._con_dependencias(objetivo)
             presentes = {e.uid for e in self.playset.mods}
             siguiente = max((e.position for e in self.playset.mods), default=-1) + 1
             for uid in objetivo:
