@@ -549,6 +549,7 @@ class MainWindow(QMainWindow):
 
         for lista in (self.active_list, self.inactive_list):
             lista.blockSignals(False)
+            lista._load_visible_icons()
 
         self._apply_filter()
         self.refresh_issues()

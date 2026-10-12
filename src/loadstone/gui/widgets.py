@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
@@ -53,6 +53,48 @@ def _gris() -> QColor:
     return QColor(current_palette().texto_apagado)
 
 
+_LADO_MINIATURA = 22
+"""Alto de la miniatura en la lista, en puntos.
+
+Lo justo para reconocer una imagen ya vista sin engordar la fila: con 213 mods,
+cada pixel de alto son dos pantallas mas de desplazamiento.
+"""
+
+_NOMBRES_MINIATURA = ("thumbnail.png", "thumbnail.jpg", "thumbnail.jpeg")
+
+_cache_miniaturas: dict[str, QIcon | None] = {}
+"""Miniaturas ya leidas, por ruta. `None` marca "aqui no hay", para no volver
+a mirar en disco cada vez que se repuebla la lista."""
+
+
+def _thumbnail_icon(carpeta: Path) -> QIcon | None:
+    """La miniatura de un mod, escalada y cacheada. `None` si no tiene."""
+    clave = str(carpeta)
+    if clave in _cache_miniaturas:
+        return _cache_miniaturas[clave]
+
+    icono: QIcon | None = None
+    for nombre in _NOMBRES_MINIATURA:
+        archivo = carpeta / nombre
+        if not archivo.is_file():
+            continue
+        imagen = QPixmap(str(archivo))
+        if imagen.isNull():
+            continue
+        icono = QIcon(
+            imagen.scaled(
+                QSize(_LADO_MINIATURA * 2, _LADO_MINIATURA),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        break
+    # Las miniaturas en .dds son habituales y Qt no las lee sin plugin: esas
+    # caen aqui y se recuerdan como "sin imagen".
+    _cache_miniaturas[clave] = icono
+    return icono
+
+
 class ModListWidget(QTreeWidget):
     """Lista de mods que acepta arrastres desde su pareja."""
 
@@ -68,11 +110,13 @@ class ModListWidget(QTreeWidget):
         self._numbered = numbered
         self._texto_vacia = ""
         self._texto_sin_resultados = ""
+        self._iconos_por_uid: dict[str, Path] = {}
 
         columnas = ["", "#", "Mod", "Version"] if numbered else ["Mod", "Version"]
         self.setHeaderLabels(columnas)
         self.setRootIsDecorated(False)
         self.setAlternatingRowColors(True)
+        self.setIconSize(QSize(_LADO_MINIATURA * 2, _LADO_MINIATURA))
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -129,7 +173,49 @@ class ModListWidget(QTreeWidget):
             # Aqui el color es el refuerzo y no el mensaje: la casilla sin
             # marcar ya dice que esta desactivado, y eso no es un color.
             item.setForeground(columna_nombre, QBrush(_gris()))
+        if mod is not None and mod.folder is not None and not falta:
+            self._iconos_por_uid[uid] = mod.folder
         self.addTopLevelItem(item)
+
+    # -------------------------------------------------------- miniaturas
+
+    def _load_visible_icons(self) -> None:
+        """Carga las miniaturas de las filas que se ven, y solo esas.
+
+        Cargarlas todas al poblar costaba segundos con una biblioteca grande:
+        medido, 213 miniaturas de las mas pequenas ya tardan 600 ms, y las de
+        verdad pesan cien veces mas. Como en pantalla caben veinte, se cargan
+        esas; el resto llega al desplazarse. Lo ya leido se queda en la cache
+        del modulo, asi que cambiar de playset y volver no vuelve a pagarlo.
+        """
+        if not self._iconos_por_uid:
+            return
+        area = self.viewport().rect()
+        columna = 2 if self._numbered else 0
+        for indice in range(self.topLevelItemCount()):
+            item = self.topLevelItem(indice)
+            if item.isHidden() or not item.icon(columna).isNull():
+                continue
+            if not self.visualItemRect(item).intersects(area):
+                continue
+            carpeta = self._iconos_por_uid.get(item.data(0, UID_ROLE))
+            if carpeta is None:
+                continue
+            icono = _thumbnail_icon(carpeta)
+            if icono is not None:
+                item.setIcon(columna, icono)
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        super().scrollContentsBy(dx, dy)
+        self._load_visible_icons()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._load_visible_icons()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._load_visible_icons()
 
     def set_empty_text(self, vacia: str, sin_resultados: str) -> None:
         """Que decir cuando no hay nada que ensenar.
@@ -169,6 +255,12 @@ class ModListWidget(QTreeWidget):
             texto,
         )
         pintor.end()
+
+    def clear(self) -> None:
+        # El indice de carpetas se va con las filas: si sobreviviera, al
+        # cambiar de juego apuntaria a los mods del anterior.
+        self._iconos_por_uid.clear()
+        super().clear()
 
     def uids(self) -> list[str]:
         return [
