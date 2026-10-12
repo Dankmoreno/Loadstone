@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Marca de Loadstone.
+
+  El nombre no es un invento: la "lodestone" es la magnetita, la piedra
+  naturalmente imantada que sirvio de primera brujula. Para un programa cuyo
+  oficio es decidir el orden de carga, el simbolo se explica solo: una piedra
+  que senala hacia donde apunta todo.
+
+  Dos decisiones que costaron un intento fallido:
+
+  - La piedra es un poligono **irregular** partido por una sola arista, no un
+    hexagono regular con tres caras. Esa segunda forma, que parece la obvia,
+    sale un cubo isometrico: el icono mas repetido del gremio, y ademas no es
+    una piedra.
+  - La aguja es gruesa y llega casi al borde. Es el unico trazo que sobrevive a
+    16 px, cuando las facetas ya se han fundido en una mancha; si es fina,
+    desaparece y queda un pedrusco sin significado.
+
+  Sin texto dentro: un icono con letras es ilegible por debajo de 48 px.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="ls-luz" x1="0.1" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#8095b8"/>
+      <stop offset="1" stop-color="#435574"/>
+    </linearGradient>
+    <linearGradient id="ls-sombra" x1="0.9" y1="0.1" x2="0.2" y2="1">
+      <stop offset="0" stop-color="#2b374e"/>
+      <stop offset="1" stop-color="#141b28"/>
+    </linearGradient>
+    <linearGradient id="ls-aguja" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#a8ecff"/>
+      <stop offset="1" stop-color="#36abe4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- La piedra. Una cara al sol y otra a la sombra, separadas por la arista
+       que baja de la punta: basta para que se lea como un volumen de verdad. -->
+  <g stroke="#0d1320" stroke-width="5" stroke-linejoin="round">
+    <polygon points="124,14 96,136 52,226 20,116 60,42" fill="url(#ls-luz)"/>
+    <polygon points="124,14 216,68 232,170 150,242 52,226 96,136"
+             fill="url(#ls-sombra)"/>
+    <!-- Esquirla brillante: rompe la simetria y da el golpe de luz que
+         distingue un mineral de un poligono cualquiera. -->
+    <polygon points="124,14 216,68 158,88" fill="#8ba1c4" stroke-width="4"/>
+  </g>
+
+  <!-- La aguja imantada, cruzando en diagonal. -->
+  <g transform="rotate(-31 126 130)">
+    <polygon points="126,24 104,130 148,130" fill="url(#ls-aguja)"
+             stroke="#0d1320" stroke-width="6" stroke-linejoin="round"/>
+    <polygon points="126,236 104,130 148,130" fill="#94a6bf"
+             stroke="#0d1320" stroke-width="6" stroke-linejoin="round"/>
+    <circle cx="126" cy="130" r="19" fill="#0d1320"/>
+    <circle cx="126" cy="130" r="10" fill="#eaf3fb"/>
+  </g>
+</svg>

@@ -1,0 +1,62 @@
+[project]
+name = "loadstone"
+version = "0.1.0"
+description = "Gestor de mods y orden de carga para juegos de Paradox (Stellaris, CK3, Victoria 3, HOI4, EU IV/V)"
+requires-python = ">=3.12"
+# Essentials en lugar de PySide6 completo: trae QtWidgets sin arrastrar Qt3D,
+# QtCharts y demas, que esta aplicacion no usa.
+#
+# WebEngine si entra, y fue una decision consciente que revierte la anterior:
+# el navegador del Workshop empotrado (Herramientas > Explorar el Workshop)
+# necesita Chromium y no hay forma de tenerlo mas barato. Son unos 130 MB en
+# el ejecutable. A cambio se navega el Workshop con la sesion de Steam
+# iniciada, que es lo unico que permite ver suscripciones y colecciones
+# privadas. Se importa de forma perezosa en gui/workshop.py, asi que quien no
+# abra esa ventana no paga el arranque, solo el tamano del paquete.
+#
+# Versiones exactas: lo que se distribuye es un ejecutable, y dos
+# compilaciones hechas en semanas distintas no deben llevar un Qt distinto sin
+# que nadie lo haya decidido. Para actualizar se sube el numero y se reprueba.
+dependencies = [
+    "PySide6-Essentials==6.12.0",
+    "PySide6-Addons==6.12.0",
+    "PySide6-WebEngine==6.12.0.140",
+    "platformdirs==4.13.0",
+    "rapidfuzz==3.14.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-qt==4.5.0",
+    "ruff==0.17.0",
+    "pyinstaller==6.22.3",
+]
+
+[project.scripts]
+loadstone = "loadstone.cli:main"
+
+[project.gui-scripts]
+loadstone-gui = "loadstone.gui.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# El SVG y el icono no son codigo, pero sin ellos la ventana sale sin marca.
+[tool.setuptools.package-data]
+"loadstone.gui.assets" = ["*.svg", "*.ico", "*.png"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Permite correr los tests sin instalar el paquete.
+pythonpath = ["src"]
+# `qt_api` evita que pytest-qt busque otros bindings de Qt instalados.
+qt_api = "pyside6"
