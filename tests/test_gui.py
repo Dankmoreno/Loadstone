@@ -598,3 +598,57 @@ def test_el_simbolo_no_estorba_al_filtrar(qtbot):
     assert lista.apply_filter("planetary") == 1
     assert lista.apply_filter("diversity") == 1
     assert lista.apply_filter("otra cosa") == 0
+
+
+def test_el_diagnostico_se_agrupa_por_tipo_de_problema(ventana):
+    """Doscientas lineas con la misma frase no son un diagnostico."""
+    # Se rompen los dos mods de la misma manera.
+    for mod in ventana.mods.values():
+        mod.on_disk = False
+        mod.in_registry = True
+    ventana.refresh_issues()
+
+    arbol = ventana.issue_tree
+    assert arbol.topLevelItemCount() >= 1
+    grupo = arbol.topLevelItem(0)
+    assert grupo.text(0) == "ERROR"
+    assert grupo.text(1) == "2 mods sin contenido en disco"
+    assert grupo.childCount() == 2
+    # Los uids viajan en los hijos, que es lo que lleva al mod al pulsarlos.
+    from loadstone.gui.widgets import UID_ROLE
+
+    assert {grupo.child(i).data(0, UID_ROLE) for i in range(2)} == {"a", "b"}
+
+
+def test_un_grupo_pequeno_se_abre_solo(ventana):
+    for mod in ventana.mods.values():
+        mod.on_disk = False
+    ventana.refresh_issues()
+    assert ventana.issue_tree.topLevelItem(0).isExpanded()
+
+
+def test_un_grupo_grande_llega_plegado(ventana):
+    """Para eso se ha agrupado: si se abriera, volveria el muro."""
+    from loadstone.core.models import Mod as _Mod
+
+    ventana.mods = {
+        f"u{i}": _Mod(uid=f"u{i}", name=f"Mod {i}", in_registry=True, on_disk=False)
+        for i in range(30)
+    }
+    ventana.refresh_issues()
+
+    grupo = ventana.issue_tree.topLevelItem(0)
+    assert grupo.childCount() == 30
+    assert not grupo.isExpanded()
+    assert "30 mods sin contenido en disco" == grupo.text(1)
+
+
+def test_los_grupos_se_ordenan_por_gravedad(ventana):
+    """Primero lo que impide jugar, despues lo que solo avisa."""
+    ventana.refresh_issues()
+    niveles = [
+        ventana.issue_tree.topLevelItem(i).text(0)
+        for i in range(ventana.issue_tree.topLevelItemCount())
+    ]
+    orden = {"ERROR": 0, "AVISO": 1, "info": 2}
+    assert niveles == sorted(niveles, key=lambda n: orden[n])

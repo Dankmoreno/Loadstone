@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core.analysis import Severity, analyze
+from ..core.analysis import IssueKind, Severity, analyze
 from ..core.backends import Backend, BackendError, get_backend
 from ..core.config import Config
 from ..core.conflicts import mod_folder_size
@@ -80,6 +80,23 @@ def _severity_color(severity: Severity) -> QColor:
         }[severity]
     )
 _SEVERITY_LABEL = {Severity.ERROR: "ERROR", Severity.WARNING: "AVISO", Severity.INFO: "info"}
+
+_ABRIR_HASTA = 6
+"""Hasta cuantos problemas de un tipo se ensenan desplegados de entrada."""
+
+# En plural y describiendo el problema, no su nombre interno: la cabecera del
+# grupo es lo unico que mucha gente va a leer.
+_ISSUE_KIND_LABEL = {
+    IssueKind.DANGLING: "mods sin contenido en disco",
+    IssueKind.ORPHAN: "mods que el launcher no conoce",
+    IssueKind.UNLINKED: "carpetas que el juego no ve",
+    IssueKind.PARSE_ERROR: "descriptores con errores",
+    IssueKind.VERSION_MISMATCH: "mods hechos para otra version del juego",
+    IssueKind.MISSING_DEPENDENCY: "dependencias que no estan instaladas",
+    IssueKind.DISABLED_DEPENDENCY: "dependencias desactivadas",
+    IssueKind.DEPENDENCY_ORDER: "dependencias que cargan demasiado tarde",
+    IssueKind.DUPLICATE: "mods duplicados",
+}
 
 
 class MainWindow(QMainWindow):
@@ -281,7 +298,9 @@ class MainWindow(QMainWindow):
 
         self.issue_tree = QTreeWidget()
         self.issue_tree.setHeaderLabels(["Nivel", "Problema"])
-        self.issue_tree.setRootIsDecorated(False)
+        # Con decoracion: ahora los problemas van agrupados y hace falta ver
+        # que un grupo se puede desplegar.
+        self.issue_tree.setRootIsDecorated(True)
         self.issue_tree.setColumnWidth(0, 60)
         self.issue_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.issue_tree.itemDoubleClicked.connect(self._on_issue_activated)
@@ -574,12 +593,39 @@ class MainWindow(QMainWindow):
             return
         issues = analyze(game, list(self.mods.values()), self.playset)
         orden = {Severity.ERROR: 0, Severity.WARNING: 1, Severity.INFO: 2}
-        issues.sort(key=lambda issue: orden[issue.severity])
+
+        # Agrupado por tipo de problema. Una instalacion rota de verdad produce
+        # doscientas lineas con la misma frase, y eso no es un diagnostico sino
+        # un muro: lo que importa —cuantas clases de problema hay y cuales— se
+        # pierde entre repeticiones.
+        grupos: dict[IssueKind, list] = {}
         for issue in issues:
-            item = QTreeWidgetItem([_SEVERITY_LABEL[issue.severity], issue.message])
-            item.setForeground(0, QBrush(_severity_color(issue.severity)))
-            item.setData(0, UID_ROLE, issue.mod_uid)
-            self.issue_tree.addTopLevelItem(item)
+            grupos.setdefault(issue.kind, []).append(issue)
+
+        def peor(lista: list) -> Severity:
+            return min((i.severity for i in lista), key=lambda s: orden[s])
+
+        for kind, lista in sorted(
+            grupos.items(), key=lambda par: (orden[peor(par[1])], -len(par[1]))
+        ):
+            severidad = peor(lista)
+            color = QBrush(_severity_color(severidad))
+            etiqueta = _ISSUE_KIND_LABEL.get(kind, kind.value)
+            padre = QTreeWidgetItem([_SEVERITY_LABEL[severidad], f"{len(lista)} {etiqueta}"])
+            padre.setForeground(0, color)
+            fuente = padre.font(1)
+            fuente.setBold(True)
+            padre.setFont(1, fuente)
+            self.issue_tree.addTopLevelItem(padre)
+
+            for issue in lista:
+                hijo = QTreeWidgetItem(["", issue.message])
+                hijo.setData(0, UID_ROLE, issue.mod_uid)
+                padre.addChild(hijo)
+
+            # Los grupos pequenos se abren solos; los de doscientos, no: para
+            # eso se ha agrupado.
+            padre.setExpanded(len(lista) <= _ABRIR_HASTA)
 
         errores = sum(1 for i in issues if i.severity is Severity.ERROR)
         avisos = sum(1 for i in issues if i.severity is Severity.WARNING)
