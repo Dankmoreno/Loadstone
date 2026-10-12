@@ -40,6 +40,7 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - deteccion de conflictos: que archivos define mas de un mod, cual gana, y
   cuales cambian de verdad frente a los que son copias identicas, con el
   diff linea a linea
+- generacion de un mod-parche con la version elegida de cada archivo
 - gestion de DLC por playset
 - arrancar el juego desde la aplicacion
 - crear, duplicar, renombrar, borrar, exportar e importar playsets
@@ -47,8 +48,9 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - interfaz con dos listas, arrastre entre ellas, ficha del mod y diagnostico,
   con menu contextual por mod (abrir carpeta, ver en el Workshop, desinstalar)
 
-Lo que falta: generar un mod-parche que fusione los conflictos. Comparar el
-**contenido** ya se hace: ver mas abajo.
+Lo que falta: fusionar de verdad dos versiones de un archivo —quedarse con lo
+que anade cada una— en vez de elegir una entera. Eso pide entender el formato
+de Clausewitz objeto a objeto.
 
 ## Por que, habiendo launcher oficial
 
@@ -370,6 +372,7 @@ src/loadstone/
     uninstall.py        quitar un mod del disco, del registro y de las listas
     conflicts.py        que archivos define mas de un mod
     filediff.py         si esos archivos cambian de verdad, y en que
+    merge.py            mod-parche con la version elegida de cada archivo
     dlc.py              los DLC instalados y su estado
     launch.py           arrancar el juego
     notes.py            notas personales por mod

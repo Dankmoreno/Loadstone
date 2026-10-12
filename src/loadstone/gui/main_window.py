@@ -1117,7 +1117,12 @@ class MainWindow(QMainWindow):
         orden = [
             self.mods[uid] for uid in self.playset.enabled_uids() if uid in self.mods
         ]
-        ConflictsDialog(self, orden).exec()
+        ConflictsDialog(
+            self,
+            orden,
+            self._current_game(),
+            lambda: self._on_game_changed(self.game_box.currentIndex()),
+        ).exec()
 
     def open_dlc(self) -> None:
         if not self._require_game() or self.playset is None:

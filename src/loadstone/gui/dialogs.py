@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -39,6 +40,7 @@ from ..core.dlc import scan_dlc
 from ..core.filediff import compare_conflict, real_conflicts, unified_diff
 from ..core.history import History, diff_snapshots, restore_into
 from ..core.install import InstallError, install_mod
+from ..core.merge import PatchSelection, build_patch_mod
 from ..core.models import GameProfile, Mod, Playset
 from ..core.quarantine import (
     DIAS_EN_CUARENTENA,
@@ -646,8 +648,18 @@ class ConflictsDialog(_BaseDialog):
     mirar un caso concreto.
     """
 
-    def __init__(self, parent: Any, mods_en_orden: list[Mod]) -> None:
-        super().__init__(parent, "Conflictos entre mods", 1000, 620)
+    def __init__(
+        self,
+        parent: Any,
+        mods_en_orden: list[Mod],
+        game: GameProfile | None = None,
+        on_patched: Callable[[], None] | None = None,
+    ) -> None:
+        super().__init__(parent, "Conflictos entre mods", 1040, 700)
+        self._game = game
+        self._on_patched = on_patched
+        self._elegidos: dict[str, PatchSelection] = {}
+        self._comparacion_actual: Any = None
         layout = QVBoxLayout(self)
 
         self.resumen = QLabel(f"Analizando {len(mods_en_orden)} mods activos...")
@@ -696,6 +708,22 @@ class ConflictsDialog(_BaseDialog):
         divisor.addWidget(self.diff)
         divisor.setSizes([400, 220])
         layout.addWidget(divisor, 1)
+
+        pie = QHBoxLayout()
+        pie.addWidget(QLabel("Para este archivo, usar la version de:"))
+        self.version_box = QComboBox()
+        self.version_box.setMinimumWidth(260)
+        self.version_box.setEnabled(False)
+        self.version_box.currentIndexChanged.connect(self._elegir_version)
+        pie.addWidget(self.version_box)
+        self.elegidos_label = QLabel()
+        self.elegidos_label.setStyleSheet(_apagado())
+        pie.addWidget(self.elegidos_label, 1)
+        self.parche_btn = QPushButton("Generar mod-parche...")
+        self.parche_btn.setEnabled(False)
+        self.parche_btn.clicked.connect(self._generar_parche)
+        pie.addWidget(self.parche_btn)
+        layout.addLayout(pie)
         layout.addWidget(self.progress)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -799,9 +827,81 @@ class ConflictsDialog(_BaseDialog):
             )
         self.resumen.setText(base)
 
+    # ------------------------------------------------------ mod-parche
+
+    def _elegir_version(self, _indice: int) -> None:
+        """Apunta de que mod se coge este archivo, si no es el que ya gana.
+
+        Elegir al ganador no es una eleccion: es lo que el juego hace solo. Se
+        borra de la lista en vez de meterlo en el parche, porque un parche
+        lleno de archivos identicos a lo que ya pasa engorda el orden de carga
+        sin cambiar nada.
+        """
+        if self._comparacion_actual is None:
+            return
+        version = self.version_box.currentData()
+        ruta = self._comparacion_actual.path
+        ganadora = self._comparacion_actual.winner
+        if version is None or (ganadora is not None and version is ganadora):
+            self._elegidos.pop(ruta, None)
+        elif version.path is not None:
+            self._elegidos[ruta] = PatchSelection(
+                path=ruta, source=version.path, mod_name=version.mod.name
+            )
+        self._refrescar_parche()
+
+    def _refrescar_parche(self) -> None:
+        cuantos = len(self._elegidos)
+        self.elegidos_label.setText(
+            f"{cuantos} archivo(s) con una version elegida a mano" if cuantos else ""
+        )
+        self.parche_btn.setEnabled(bool(cuantos))
+        self.parche_btn.setText(
+            f"Generar mod-parche ({cuantos})..." if cuantos else "Generar mod-parche..."
+        )
+
+    def _generar_parche(self) -> None:
+        if not self._elegidos or self._game is None:
+            return
+        nombre, aceptado = QInputDialog.getText(
+            self,
+            "Generar mod-parche",
+            "Nombre del mod-parche:",
+            text="Parche de Loadstone",
+        )
+        if not aceptado or not nombre.strip():
+            return
+
+        juego = self._game
+        selecciones = list(self._elegidos.values())
+        self.parche_btn.setEnabled(False)
+        self.run_task(
+            lambda: build_patch_mod(juego, nombre.strip(), selecciones),
+            self._parche_listo,
+            busy_text="construyendo el parche...",
+        )
+
+    def _parche_listo(self, mod: Any) -> None:
+        QMessageBox.information(
+            self,
+            "Parche creado",
+            f"'{mod.name}' queda instalado con {len(self._elegidos)} archivo(s).\n\n"
+            "Anadelo al playset y ponlo el ULTIMO: un parche solo gana si carga "
+            "despues de todo lo que corrige.",
+        )
+        self._refrescar_parche()
+        if self._on_patched is not None:
+            self._on_patched()
+
     def _mostrar_diff(self) -> None:
         """El diff del archivo elegido, entre quien pierde y quien gana."""
         self.diff.clear()
+        self._comparacion_actual = None
+        self.version_box.blockSignals(True)
+        self.version_box.clear()
+        self.version_box.setEnabled(False)
+        self.version_box.blockSignals(False)
+
         if self._informe is None or self.vista.currentData() != "archivos":
             return
         items = self.tabla.selectedItems()
@@ -813,6 +913,8 @@ class ConflictsDialog(_BaseDialog):
         conflicto = self._conflictos_visibles()[indice]
 
         comparacion = compare_conflict(conflicto)
+        self._comparacion_actual = comparacion
+        self._poblar_versiones(comparacion)
         if comparacion.identicas:
             self.diff.setPlainText(
                 "Los " + str(len(conflicto.mods)) + " mods traen este archivo "
@@ -845,6 +947,33 @@ class ConflictsDialog(_BaseDialog):
                 continue
             bloques.append("".join(diff))
         self.diff.setPlainText("\n".join(bloques))
+
+    def _poblar_versiones(self, comparacion: Any) -> None:
+        """Llena el desplegable con quien trae este archivo, y marca lo elegido."""
+        if not comparacion.comparable:
+            return
+        self.version_box.blockSignals(True)
+        for version in comparacion.versions:
+            if not version.disponible:
+                continue
+            etiqueta = version.mod.name
+            if version is comparacion.winner:
+                etiqueta += "  (la que gana ahora)"
+            self.version_box.addItem(etiqueta, version)
+
+        elegida = self._elegidos.get(comparacion.path)
+        if elegida is not None:
+            for fila in range(self.version_box.count()):
+                if self.version_box.itemData(fila).mod.name == elegida.mod_name:
+                    self.version_box.setCurrentIndex(fila)
+                    break
+        elif comparacion.winner is not None:
+            for fila in range(self.version_box.count()):
+                if self.version_box.itemData(fila) is comparacion.winner:
+                    self.version_box.setCurrentIndex(fila)
+                    break
+        self.version_box.setEnabled(True)
+        self.version_box.blockSignals(False)
 
 
 class DlcDialog(_BaseDialog):

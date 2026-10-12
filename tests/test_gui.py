@@ -810,3 +810,37 @@ def test_un_archivo_identico_lo_dice_en_vez_de_ensenar_un_diff_vacio(qtbot, tmp_
     dialogo.tabla.setCurrentItem(dialogo.tabla.topLevelItem(0))
 
     assert "identico byte a byte" in dialogo.diff.toPlainText()
+
+
+def test_elegir_otra_version_prepara_el_parche(qtbot, tmp_path, juego):
+    """El caso que motiva el parche: quiero la del que pierde."""
+    from loadstone.gui.dialogs import ConflictsDialog
+
+    mods = [
+        _mod_con_archivo(tmp_path, "a", "quiero esta\n"),
+        _mod_con_archivo(tmp_path, "b", "esta gana ahora\n"),
+    ]
+    dialogo = ConflictsDialog(None, mods, juego)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo._informe is not None)
+
+    dialogo.vista.setCurrentIndex(1)
+    dialogo.tabla.setCurrentItem(dialogo.tabla.topLevelItem(0))
+
+    # El desplegable llega con el ganador actual marcado, y eso no es elegir.
+    assert dialogo.version_box.count() == 2
+    assert "(la que gana ahora)" in dialogo.version_box.currentText()
+    assert dialogo._elegidos == {}
+    assert not dialogo.parche_btn.isEnabled()
+
+    # Elegir al que pierde si cuenta.
+    dialogo.version_box.setCurrentIndex(0)
+    assert list(dialogo._elegidos) == ["common/x.txt"]
+    assert dialogo._elegidos["common/x.txt"].mod_name == "Mod a"
+    assert dialogo.parche_btn.isEnabled()
+    assert "(1)" in dialogo.parche_btn.text()
+
+    # Y volver al ganador lo retira: un parche con lo que ya pasa no sirve.
+    dialogo.version_box.setCurrentIndex(1)
+    assert dialogo._elegidos == {}
+    assert not dialogo.parche_btn.isEnabled()
