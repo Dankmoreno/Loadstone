@@ -244,6 +244,18 @@ class MainWindow(QMainWindow):
         caja.addWidget(titulo)
 
         lista = ModListWidget(with_checkboxes=activos, numbered=activos)
+        if activos:
+            lista.set_empty_text(
+                "Este playset esta vacio.\n\n"
+                "Arrastra mods desde la izquierda, o seleccionalos y pulsa\n"
+                "'Anadir al playset'.",
+                "Ningun mod del playset casa con el filtro.",
+            )
+        else:
+            lista.set_empty_text(
+                "Todo lo que tienes instalado esta ya en este playset.",
+                "Ningun mod instalado casa con el filtro.",
+            )
         lista.itemSelectionChanged.connect(lambda: self._on_selection(lista))
         lista.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         lista.customContextMenuRequested.connect(

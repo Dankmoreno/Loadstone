@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFormLayout,
@@ -66,6 +66,8 @@ class ModListWidget(QTreeWidget):
         super().__init__()
         self._with_checkboxes = with_checkboxes
         self._numbered = numbered
+        self._texto_vacia = ""
+        self._texto_sin_resultados = ""
 
         columnas = ["", "#", "Mod", "Version"] if numbered else ["Mod", "Version"]
         self.setHeaderLabels(columnas)
@@ -128,6 +130,45 @@ class ModListWidget(QTreeWidget):
             # marcar ya dice que esta desactivado, y eso no es un color.
             item.setForeground(columna_nombre, QBrush(_gris()))
         self.addTopLevelItem(item)
+
+    def set_empty_text(self, vacia: str, sin_resultados: str) -> None:
+        """Que decir cuando no hay nada que ensenar.
+
+        Son dos mensajes y no uno porque son dos situaciones distintas: una
+        lista vacia de verdad pide explicar que hacer, y una lista que el
+        filtro ha dejado sin nada solo tiene que decir que el filtro es el
+        culpable, no que no haya mods.
+        """
+        self._texto_vacia = vacia
+        self._texto_sin_resultados = sin_resultados
+
+    def paintEvent(self, event) -> None:
+        """Dibuja el mensaje cuando no queda ninguna fila a la vista.
+
+        Un rectangulo en blanco no distingue entre "aqui no hay nada todavia" y
+        "esto no ha cargado", y la primera lectura de quien abre el programa por
+        primera vez suele ser la segunda.
+        """
+        super().paintEvent(event)
+        if not self._texto_vacia:
+            return
+        total = self.topLevelItemCount()
+        visibles = sum(
+            not self.topLevelItem(i).isHidden() for i in range(total)
+        )
+        if visibles:
+            return
+
+        texto = self._texto_vacia if total == 0 else self._texto_sin_resultados
+        pintor = QPainter(self.viewport())
+        pintor.setPen(QColor(current_palette().texto_apagado))
+        margen = self.viewport().rect().adjusted(24, 24, -24, -24)
+        pintor.drawText(
+            margen,
+            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+            texto,
+        )
+        pintor.end()
 
     def uids(self) -> list[str]:
         return [

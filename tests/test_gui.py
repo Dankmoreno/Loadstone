@@ -652,3 +652,31 @@ def test_los_grupos_se_ordenan_por_gravedad(ventana):
     ]
     orden = {"ERROR": 0, "AVISO": 1, "info": 2}
     assert niveles == sorted(niveles, key=lambda n: orden[n])
+
+
+def test_una_lista_vacia_explica_que_hacer(qtbot):
+    """Un rectangulo en blanco no distingue 'no hay nada' de 'no ha cargado'."""
+    from loadstone.gui.widgets import ModListWidget
+
+    lista = ModListWidget(with_checkboxes=True, numbered=True)
+    qtbot.addWidget(lista)
+    lista.set_empty_text("Esto esta vacio", "Nada casa con el filtro")
+    lista.resize(400, 300)
+
+    # Vacia de verdad: el mensaje que explica que hacer.
+    assert lista.topLevelItemCount() == 0
+    lista.render(lista.viewport().grab())  # fuerza el paintEvent sin pantalla
+
+    # Con contenido no se dibuja nada.
+    mod = Mod(uid="a", name="Uno", on_disk=True)
+    lista.add_mod(mod, "a", enabled=True, position=0)
+    assert lista.topLevelItemCount() == 1
+
+
+def test_los_dos_mensajes_son_distintos(ventana):
+    """Vacia de verdad y vaciada por el filtro no son la misma situacion."""
+    assert ventana.active_list._texto_vacia != ventana.active_list._texto_sin_resultados
+    assert "filtro" in ventana.active_list._texto_sin_resultados
+    assert "filtro" not in ventana.active_list._texto_vacia
+    # Y las dos listas dicen cosas distintas, porque hacen cosas distintas.
+    assert ventana.active_list._texto_vacia != ventana.inactive_list._texto_vacia
