@@ -27,6 +27,7 @@ from .core.models import GameProfile, LoadOrderMode, Mod, Playset, PlaysetMod
 from .core.search import SearchOptions, SearchScope, search_mods, select_scope
 from .core.sorting import CycleError, minimal_moves, sort_alphabetical, sort_by_dependencies
 from .core.steamcmd import SteamCmd, SteamCmdError
+from .core.uninstall import execute_uninstall, plan_uninstall
 from .core.updates import UpdateState, check_updates
 from .core.workshop_api import WorkshopApiError, collection_items, parse_workshop_id
 
@@ -551,6 +552,68 @@ def _restore_snapshot(
     return 0
 
 
+def cmd_uninstall(args: argparse.Namespace) -> int:
+    """Quita mods del disco, del registro y de todos los playsets.
+
+    Es lo contrario de `clean`: aquel borra basura y por eso se niega a tocar
+    nada que algun playset mencione; este borra mods sanos que ya no se
+    quieren, y por eso tiene que sacarlos de los playsets el primero.
+
+    Sin `--write` solo cuenta lo que haria. Un borrado irreversible no debe
+    ocurrir por escribir mal el nombre de un mod.
+    """
+    game = _pick_game(args)
+    backend = get_backend(game)
+    mods = backend.read_mods()
+    playsets = backend.read_playsets()
+
+    elegidos: list[Mod] = []
+    for texto in args.mods:
+        clave = texto.lower()
+        # Un uid o un id del Workshop exacto manda sobre cualquier parecido de
+        # nombre. Si no, el consejo de "usa el id para desambiguar" no serviria
+        # de nada: un uid corto como 'a' aparece dentro de medio catalogo.
+        exactos = [m for m in mods if m.uid == texto or (m.steam_id or "") == texto]
+        coincidencias = exactos or [m for m in mods if clave in m.name.lower()]
+        if not coincidencias:
+            raise SystemExit(f"no encuentro ningun mod que case con '{texto}'")
+        if len(coincidencias) > 1 and not args.all_matches:
+            nombres = ", ".join(m.name for m in coincidencias[:5])
+            raise SystemExit(
+                f"'{texto}' casa con {len(coincidencias)} mods ({nombres}...). "
+                "Afina el texto, usa el id, o pasa --all-matches para todos."
+            )
+        elegidos.extend(coincidencias)
+
+    unicos = list({m.uid: m for m in elegidos}.values())
+    planes = [plan_uninstall(m, playsets, mod_dir=game.mod_dir) for m in unicos]
+
+    total = sum(plan.size for plan in planes)
+    print(f"{game.display_name}: {len(planes)} mod(s) a desinstalar")
+    for plan in planes:
+        en_playsets = f", en {len(plan.playsets)} playset(s)" if plan.playsets else ""
+        fuera = " [contenido de Steam, no se borra]" if plan.is_steam_managed else ""
+        megas = plan.size / 1024 / 1024
+        print(f"  {plan.mod.name[:48]:50} {megas:6.1f} MB{en_playsets}{fuera}")
+    if total:
+        print(f"liberaria {total / 1024 / 1024:.1f} MB")
+
+    if not args.write:
+        print("(simulacion: nada borrado. Anade --write para hacerlo)")
+        return 0
+
+    hechos, errores = execute_uninstall(
+        planes,
+        save_playset=backend.save_playset,
+        unregister=backend.unregister_mod,
+        include_outside=args.include_steam,
+    )
+    print(f"{hechos} mod(s) desinstalados")
+    for error in errores[:10]:
+        print(f"  {error}", file=sys.stderr)
+    return 0 if not errores else 1
+
+
 def cmd_clean(args: argparse.Namespace) -> int:
     game = _pick_game(args)
     backend = get_backend(game)
@@ -850,6 +913,25 @@ def build_parser() -> argparse.ArgumentParser:
     history.add_argument("--note", help="anotar la instantanea indicada o la ultima")
     history.add_argument("--snapshot", metavar="ID", help="a cual poner la nota")
     history.set_defaults(func=cmd_history)
+
+    uninstall = with_game(
+        "uninstall", "borra mods del disco, del registro y de las listas"
+    )
+    uninstall.add_argument(
+        "mods", nargs="+", metavar="MOD", help="uid, id del Workshop o parte del nombre"
+    )
+    uninstall.add_argument(
+        "--all-matches",
+        action="store_true",
+        help="si un texto casa con varios mods, desinstalarlos todos",
+    )
+    uninstall.add_argument(
+        "--include-steam",
+        action="store_true",
+        help="borrar tambien el contenido que vive fuera de la carpeta del juego",
+    )
+    uninstall.add_argument("--write", action="store_true", help="borrar de verdad")
+    uninstall.set_defaults(func=cmd_uninstall)
 
     clean = with_game("clean", "limpia descriptores colgados y restos en mod/")
     clean.add_argument(

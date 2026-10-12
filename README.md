@@ -268,6 +268,15 @@ suscripcion Steam lo volvera a descargar.
 Los playsets se escriben en el juego al instante: no hace falta pulsar
 Guardar despues.
 
+Desde la linea de comandos es `loadstone uninstall`, que sin `--write` solo
+cuenta lo que haria. Un texto que case con varios mods para el comando en
+vez de adivinar; para desambiguar se usa el uid o el id del Workshop, que
+mandan sobre cualquier parecido de nombre.
+
+```bash
+loadstone uninstall --game stellaris 1595876588 --write
+```
+
 ## La marca y el tema
 
 El nombre no era un juego de palabras libre: la *lodestone* es la magnetita, la
