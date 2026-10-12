@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import (
     QAction,
     QBrush,
     QColor,
-    QDesktopServices,
     QFont,
     QImage,
     QPainter,
@@ -31,7 +30,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QMenu,
     QMessageBox,
     QPushButton,
     QSplitter,
@@ -54,19 +52,8 @@ from ..core.notes import Notes
 from ..core.playsets import export_playset, import_playset, read_playset_file
 from ..core.repair import RepairPlan, plan_repair
 from ..core.sorting import CycleError, minimal_moves, sort_alphabetical, sort_by_dependencies
+from .actions import ToolActionsMixin
 from .assets import svg_path
-from .dialogs import (
-    CleanupDialog,
-    ConflictsDialog,
-    DlcDialog,
-    DownloadDialog,
-    HistoryDialog,
-    QuarantineDialog,
-    RepairDialog,
-    SearchDialog,
-    UninstallDialog,
-    UpdatesDialog,
-)
 from .theme import current_palette
 from .widgets import UID_ROLE, DetailPanel, ModListWidget
 
@@ -100,7 +87,7 @@ _ISSUE_KIND_LABEL = {
 }
 
 
-class MainWindow(QMainWindow):
+class MainWindow(ToolActionsMixin, QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Loadstone")
@@ -675,24 +662,6 @@ class MainWindow(QMainWindow):
         self.repair_button.setText(f"Recuperar {len(plan.recuperables)}...")
         self.repair_bar.setVisible(True)
 
-    def open_repair(self) -> None:
-        if not self._require_game():
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        plan = plan_repair(list(self.mods.values()))
-        if not plan.hay_algo_que_hacer:
-            QMessageBox.information(
-                self, "Nada que recuperar", "No falta ningun mod recuperable."
-            )
-            return
-        RepairDialog(
-            self,
-            game,
-            self.backend,
-            plan,
-            lambda: self._on_game_changed(self.game_box.currentIndex()),
-        ).exec()
 
     def _update_status(self) -> None:
         if self.playset is None:
@@ -1086,216 +1055,6 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Playset importado", aviso)
         self._set_dirty(True)
         self.populate()
-
-    # --------------------------------------------------------- herramientas
-
-    def _require_game(self) -> bool:
-        if self.backend is None or self._current_game() is None:
-            QMessageBox.information(
-                self, "Sin juego", "Primero selecciona un juego con datos."
-            )
-            return False
-        return True
-
-    def open_search(self) -> None:
-        if self._require_game():
-            SearchDialog(self, list(self.mods.values()), self.playset).exec()
-
-    def open_updates(self) -> None:
-        if self._require_game():
-            UpdatesDialog(
-                self,
-                list(self.mods.values()),
-                self._current_game(),
-                self.backend,
-                lambda: self._on_game_changed(self.game_box.currentIndex()),
-            ).exec()
-
-    def open_conflicts(self) -> None:
-        if not self._require_game() or self.playset is None:
-            return
-        orden = [
-            self.mods[uid] for uid in self.playset.enabled_uids() if uid in self.mods
-        ]
-        ConflictsDialog(
-            self,
-            orden,
-            self._current_game(),
-            lambda: self._on_game_changed(self.game_box.currentIndex()),
-        ).exec()
-
-    def open_dlc(self) -> None:
-        if not self._require_game() or self.playset is None:
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        DlcDialog(self, game, self.playset, self.backend).exec()
-
-    def open_download(self) -> None:
-        if not self._require_game():
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        DownloadDialog(
-            self, game, self.backend, lambda: self._on_game_changed(self.game_box.currentIndex())
-        ).exec()
-
-    def open_workshop(self) -> None:
-        if not self._require_game():
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        if game.steam_appid is None:
-            QMessageBox.information(
-                self,
-                "Sin Workshop",
-                f"De {game.display_name} no se conoce el appid de Steam, "
-                "asi que no hay Workshop que explorar.",
-            )
-            return
-        # Importado aqui y no arriba a proposito: arrastra QtWebEngine, que son
-        # 130 MB y un par de segundos. Quien no abra el navegador no los paga.
-        try:
-            from .workshop import WorkshopBrowserDialog
-        except ImportError as error:
-            QMessageBox.warning(
-                self,
-                "Falta el navegador",
-                "Esta instalacion no trae QtWebEngine, asi que el navegador "
-                "empotrado no esta disponible.\n\nPuedes seguir anadiendo mods "
-                "con 'Descargar del Workshop por enlace...' (Ctrl+D).\n\n"
-                f"Detalle: {error}",
-            )
-            return
-        WorkshopBrowserDialog(
-            self, game, self.backend, lambda: self._on_game_changed(self.game_box.currentIndex())
-        ).exec()
-
-    def open_history(self) -> None:
-        if not self._require_game():
-            return
-        game = self._current_game()
-        assert game is not None
-
-        def restaurada() -> None:
-            self.populate()
-            self._set_dirty(True)
-
-        HistoryDialog(self, game, self.playset, list(self.mods.values()), restaurada).exec()
-
-    # ---------------------------------------------------- menu contextual
-
-    def _mod_context_menu(self, lista: ModListWidget, punto) -> None:
-        """Lo que se puede hacer con un mod concreto, donde se busca: encima.
-
-        Las acciones que solo tienen sentido con un mod se desactivan en vez de
-        esconderse cuando hay varios seleccionados: un menu que cambia de
-        tamano segun lo que haya marcado obliga a volver a leerlo cada vez.
-        """
-        uids = lista.selected_uids()
-        if not uids:
-            uid = lista.current_uid()
-            if uid is None:
-                return
-            uids = [uid]
-
-        mods = [self.mods[uid] for uid in uids if uid in self.mods]
-        if not mods:
-            return
-        uno = mods[0] if len(mods) == 1 else None
-
-        menu = QMenu(self)
-
-        abrir = menu.addAction("Abrir la carpeta del mod")
-        abrir.setEnabled(uno is not None and uno.folder is not None)
-        abrir.triggered.connect(lambda: self._open_mod_folder(mods[0]))
-
-        workshop = menu.addAction("Ver en el Workshop")
-        workshop.setEnabled(uno is not None and bool(uno.steam_id))
-        workshop.triggered.connect(lambda: self._open_workshop_page(mods[0]))
-
-        menu.addSeparator()
-        etiqueta = (
-            f"Desinstalar '{mods[0].name}'..."
-            if uno is not None
-            else f"Desinstalar {len(mods)} mods..."
-        )
-        desinstalar = menu.addAction(etiqueta)
-        desinstalar.triggered.connect(lambda: self.uninstall_mods(mods))
-
-        menu.exec(lista.viewport().mapToGlobal(punto))
-
-    def _open_mod_folder(self, mod: Mod) -> None:
-        if mod.folder is None:
-            return
-        try:
-            open_in_file_manager(mod.folder)
-        except OSError as error:
-            QMessageBox.warning(self, "No se pudo abrir", str(error))
-
-    def _open_workshop_page(self, mod: Mod) -> None:
-        if not mod.steam_id:
-            return
-        QDesktopServices.openUrl(
-            QUrl(f"https://steamcommunity.com/sharedfiles/filedetails/?id={mod.steam_id}")
-        )
-
-    def uninstall_mods(self, mods: list[Mod]) -> None:
-        """Borra mods del disco, del registro y de todos los playsets."""
-        if not self._require_game() or not mods:
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        backend = self.backend
-
-        # Desinstalar escribe los playsets en el juego, y los escribe tal y
-        # como estan en memoria. Con cambios a medias se colarian ademas esas
-        # ediciones, que nadie ha pedido guardar todavia. Antes de tocar nada
-        # se exige decidir sobre ellas.
-        if self.dirty:
-            QMessageBox.information(
-                self,
-                "Hay cambios sin guardar",
-                "Desinstalar reescribe los playsets en el juego, asi que "
-                "arrastraria tambien los cambios que tienes a medias.\n\n"
-                "Pulsa Guardar o Revertir y vuelve a intentarlo.",
-            )
-            return
-
-        def terminado() -> None:
-            # Los playsets ya se han escrito en el juego, asi que lo que haya
-            # en pantalla esta obsoleto: se recarga todo en vez de parchearlo.
-            self._set_dirty(False)
-            self._on_game_changed(self.game_box.currentIndex())
-
-        UninstallDialog(
-            self,
-            game,
-            mods,
-            self.playsets,
-            backend.save_playset,
-            backend.unregister_mod,
-            terminado,
-        ).exec()
-
-    def open_quarantine(self) -> None:
-        QuarantineDialog(
-            self, lambda: self._on_game_changed(self.game_box.currentIndex())
-        ).exec()
-
-    def open_cleanup(self) -> None:
-        if not self._require_game():
-            return
-        game = self._current_game()
-        assert game is not None and self.backend is not None
-        CleanupDialog(
-            self,
-            game,
-            list(self.mods.values()),
-            self.playsets,
-            self.backend.unregister_mod,
-            lambda: self._on_game_changed(self.game_box.currentIndex()),
-        ).exec()
 
     # ------------------------------------------------------------- cierre
 

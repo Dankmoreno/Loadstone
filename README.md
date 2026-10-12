@@ -382,7 +382,8 @@ src/loadstone/
       launcher_v2.py    launcher-v2.sqlite + dlc_load.json
       playsets_json.py  playsets.json del gestor in-game (EU5)
   gui/                  interfaz PySide6
-    main_window.py      ventana principal
+    main_window.py      ventana principal: montarla y mantenerla al dia
+    actions.py          lo que el usuario dispara: herramientas y clic derecho
     widgets.py          las dos listas de mods y la ficha de detalle
     dialogs.py          busqueda, conflictos, DLC, descargas, historial...
     workshop.py         el Workshop empotrado; lo unico que usa QtWebEngine

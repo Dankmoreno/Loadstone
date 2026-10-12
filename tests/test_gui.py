@@ -314,7 +314,7 @@ def test_el_menu_contextual_ofrece_las_tres_acciones(ventana, qtbot):
 
     menus = []
 
-    import loadstone.gui.main_window as mw
+    import loadstone.gui.actions as mw
 
     class _MenuEspia(mw.QMenu):
         def __init__(self, *a, **k):
@@ -341,7 +341,7 @@ def test_el_menu_contextual_ofrece_las_tres_acciones(ventana, qtbot):
 def test_ver_en_el_workshop_solo_si_el_mod_viene_de_steam(ventana):
     from PySide6.QtCore import QPoint
 
-    import loadstone.gui.main_window as mw
+    import loadstone.gui.actions as mw
 
     menus = []
 
@@ -371,7 +371,7 @@ def test_ver_en_el_workshop_solo_si_el_mod_viene_de_steam(ventana):
 
 def test_desinstalar_se_niega_con_cambios_sin_guardar(ventana, mods, monkeypatch):
     """Escribiria en el juego ediciones que nadie ha pedido guardar."""
-    import loadstone.gui.main_window as mw
+    import loadstone.gui.actions as mw
 
     avisos = []
 
@@ -428,7 +428,7 @@ def _espiar_menu(mw, menus):
 def test_con_varios_seleccionados_el_menu_los_desinstala_todos(ventana, monkeypatch):
     from PySide6.QtCore import QPoint
 
-    import loadstone.gui.main_window as mw
+    import loadstone.gui.actions as mw
 
     recibidos = []
     monkeypatch.setattr(ventana, "uninstall_mods", recibidos.append)
