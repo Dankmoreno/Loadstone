@@ -37,7 +37,9 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
   volviendolos a descargar del Workshop por su id
 - desinstalar mods: del disco, del registro y de todos los playsets a la vez,
   con papelera de 14 dias para deshacerlo
-- deteccion de conflictos: que archivos define mas de un mod y cual gana
+- deteccion de conflictos: que archivos define mas de un mod, cual gana, y
+  cuales cambian de verdad frente a los que son copias identicas, con el
+  diff linea a linea
 - gestion de DLC por playset
 - arrancar el juego desde la aplicacion
 - crear, duplicar, renombrar, borrar, exportar e importar playsets
@@ -45,8 +47,8 @@ v0.1, en desarrollo. Funciona el nucleo y la linea de comandos:
 - interfaz con dos listas, arrastre entre ellas, ficha del mod y diagnostico,
   con menu contextual por mod (abrir carpeta, ver en el Workshop, desinstalar)
 
-Lo que falta: comparar el **contenido** de los archivos en conflicto, no solo
-sus rutas, y generar un mod-parche que los fusione.
+Lo que falta: generar un mod-parche que fusione los conflictos. Comparar el
+**contenido** ya se hace: ver mas abajo.
 
 ## Por que, habiendo launcher oficial
 
@@ -367,6 +369,7 @@ src/loadstone/
     quarantine.py       papelera de lo desinstalado, para poder deshacerlo
     uninstall.py        quitar un mod del disco, del registro y de las listas
     conflicts.py        que archivos define mas de un mod
+    filediff.py         si esos archivos cambian de verdad, y en que
     dlc.py              los DLC instalados y su estado
     launch.py           arrancar el juego
     notes.py            notas personales por mod

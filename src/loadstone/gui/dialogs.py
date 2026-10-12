@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSplitter,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -35,6 +36,7 @@ from ..core.backends import Backend, BackendError
 from ..core.cleanup import CleanupKind, execute_cleanup, plan_cleanup
 from ..core.conflicts import find_conflicts
 from ..core.dlc import scan_dlc
+from ..core.filediff import compare_conflict, real_conflicts, unified_diff
 from ..core.history import History, diff_snapshots, restore_into
 from ..core.install import InstallError, install_mod
 from ..core.models import GameProfile, Mod, Playset
@@ -651,24 +653,49 @@ class ConflictsDialog(_BaseDialog):
         self.resumen = QLabel(f"Analizando {len(mods_en_orden)} mods activos...")
         layout.addWidget(self.resumen)
         aviso = QLabel(
-            "Gana el que carga el ultimo. Esto compara rutas de archivo, no su "
-            "contenido: dos mods en el mismo archivo pueden estar tocando cosas "
-            "distintas."
+            "Gana el que carga el ultimo. Marca 'Solo los que cambian algo' para "
+            "leer los archivos y descartar los que son copias identicas; sobre un "
+            "conflicto real, la vista por archivo ensena que cambia."
         )
         aviso.setWordWrap(True)
         aviso.setStyleSheet(_apagado())
         layout.addWidget(aviso)
 
+        fila = QHBoxLayout()
         self.vista = QComboBox()
         self.vista.addItem("Por parejas de mods", "parejas")
         self.vista.addItem("Por archivo", "archivos")
         self.vista.currentIndexChanged.connect(lambda _i: self._pintar())
-        layout.addWidget(self.vista)
+        fila.addWidget(self.vista)
+        self.solo_reales = QCheckBox("Solo los que cambian algo")
+        self.solo_reales.setToolTip(
+            "Lee cada archivo en disputa y aparta los que todos los mods traen\n"
+            "identicos. Cuesta un rato la primera vez."
+        )
+        self.solo_reales.toggled.connect(self._alternar_reales)
+        fila.addWidget(self.solo_reales)
+        fila.addStretch(1)
+        layout.addLayout(fila)
 
+        divisor = QSplitter(Qt.Orientation.Vertical)
         self.tabla = QTreeWidget()
         self.tabla.setRootIsDecorated(False)
         self.tabla.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self.tabla, 1)
+        self.tabla.itemSelectionChanged.connect(self._mostrar_diff)
+        divisor.addWidget(self.tabla)
+
+        self.diff = QPlainTextEdit()
+        self.diff.setReadOnly(True)
+        self.diff.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.diff.setPlaceholderText(
+            "Elige un archivo en la vista 'Por archivo' para ver que cambia."
+        )
+        fuente = QFont("Consolas")
+        fuente.setStyleHint(QFont.StyleHint.Monospace)
+        self.diff.setFont(fuente)
+        divisor.addWidget(self.diff)
+        divisor.setSizes([400, 220])
+        layout.addWidget(divisor, 1)
         layout.addWidget(self.progress)
 
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -676,6 +703,8 @@ class ConflictsDialog(_BaseDialog):
         layout.addWidget(botones)
 
         self._informe: Any = None
+        self._reales: list | None = None
+        self._identicos: list = []
         self.run_task(
             lambda: find_conflicts(mods_en_orden),
             self._listo,
@@ -684,11 +713,7 @@ class ConflictsDialog(_BaseDialog):
 
     def _listo(self, informe: Any) -> None:
         self._informe = informe
-        parejas = informe.by_pair()
-        self.resumen.setText(
-            f"{len(informe.conflicts)} archivos en conflicto entre "
-            f"{informe.scanned} mods, en {len(parejas)} parejas"
-        )
+        self._actualizar_resumen()
         self._pintar()
 
     def _pintar(self) -> None:
@@ -718,13 +743,108 @@ class ConflictsDialog(_BaseDialog):
         cabecera.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         cabecera.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.tabla.setColumnWidth(2, 60)
-        for conflicto in self._informe.conflicts:
+        for indice, conflicto in enumerate(self._conflictos_visibles()):
             nombre = conflicto.winner.name
             if conflicto.replaced:
                 nombre += "  (reemplaza la carpeta entera)"
-            self.tabla.addTopLevelItem(
-                QTreeWidgetItem([conflicto.path, nombre, str(len(conflicto.mods))])
+            item = QTreeWidgetItem([conflicto.path, nombre, str(len(conflicto.mods))])
+            item.setData(0, Qt.ItemDataRole.UserRole, indice)
+            self.tabla.addTopLevelItem(item)
+
+    # --------------------------------------------------- contenido real
+
+    def _conflictos_visibles(self) -> list:
+        """Todos, o solo los que de verdad cambian algo."""
+        if self._reales is None:
+            return self._informe.conflicts
+        rutas = {comparacion.path for comparacion in self._reales}
+        return [c for c in self._informe.conflicts if c.path in rutas]
+
+    def _alternar_reales(self, marcado: bool) -> None:
+        if not marcado or self._informe is None:
+            self._reales = None
+            self._pintar()
+            self._actualizar_resumen()
+            return
+        if self._reales is not None:
+            self._pintar()
+            return
+
+        conflictos = list(self._informe.conflicts)
+        self.solo_reales.setEnabled(False)
+        self.run_task(
+            lambda: real_conflicts(conflictos),
+            self._reales_listos,
+            busy_text="leyendo los archivos en disputa...",
+        )
+
+    def _reales_listos(self, resultado: tuple) -> None:
+        self._reales, self._identicos = resultado
+        self.solo_reales.setEnabled(True)
+        self._pintar()
+        self._actualizar_resumen()
+
+    def _actualizar_resumen(self) -> None:
+        if self._informe is None:
+            return
+        total = len(self._informe.conflicts)
+        base = (
+            f"{total} archivos en conflicto entre {self._informe.scanned} mods, "
+            f"en {len(self._informe.by_pair())} parejas"
+        )
+        if self._reales is not None:
+            base += (
+                f"  ·  {len(self._reales)} cambian algo, "
+                f"{len(self._identicos)} son copias identicas"
             )
+        self.resumen.setText(base)
+
+    def _mostrar_diff(self) -> None:
+        """El diff del archivo elegido, entre quien pierde y quien gana."""
+        self.diff.clear()
+        if self._informe is None or self.vista.currentData() != "archivos":
+            return
+        items = self.tabla.selectedItems()
+        if not items:
+            return
+        indice = items[0].data(0, Qt.ItemDataRole.UserRole)
+        if indice is None:
+            return
+        conflicto = self._conflictos_visibles()[indice]
+
+        comparacion = compare_conflict(conflicto)
+        if comparacion.identicas:
+            self.diff.setPlainText(
+                "Los " + str(len(conflicto.mods)) + " mods traen este archivo "
+                "identico byte a byte. No hay nada que decidir."
+            )
+            return
+        if not comparacion.comparable:
+            self.diff.setPlainText(
+                "No se pueden leer dos versiones de este archivo: alguno de los "
+                "mods no lo tiene en disco."
+            )
+            return
+
+        ganadora = comparacion.winner
+        bloques: list[str] = []
+        for version in comparacion.versions[:-1]:
+            if not version.disponible:
+                bloques.append(f"=== {version.mod.name}: no esta en disco")
+                continue
+            if version.digest == ganadora.digest:
+                bloques.append(f"=== {version.mod.name}: identico al que gana")
+                continue
+            diff = unified_diff(version, ganadora)
+            if diff is None:
+                bloques.append(
+                    f"=== {version.mod.name} -> {ganadora.mod.name}: "
+                    f"binario o demasiado grande ({version.size:,} frente a "
+                    f"{ganadora.size:,} bytes)"
+                )
+                continue
+            bloques.append("".join(diff))
+        self.diff.setPlainText("\n".join(bloques))
 
 
 class DlcDialog(_BaseDialog):

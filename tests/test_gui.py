@@ -740,3 +740,73 @@ def test_sin_dependencias_que_falten_no_se_pregunta_nada(ventana, monkeypatch):
     ventana._move_uids(["b"], to_active=True)
 
     assert preguntas == [], "no debe molestar cuando no hay nada que resolver"
+
+
+def _mod_con_archivo(raiz, uid, contenido, ruta="common/x.txt"):
+    carpeta = raiz / uid
+    archivo = carpeta / ruta
+    archivo.parent.mkdir(parents=True, exist_ok=True)
+    archivo.write_text(contenido, encoding="utf-8")
+    return Mod(uid=uid, name=f"Mod {uid}", folder=carpeta, on_disk=True)
+
+
+def test_los_conflictos_separan_las_copias_identicas(qtbot, tmp_path):
+    """Lo que mas ruido mete en una instalacion grande."""
+    from loadstone.gui.dialogs import ConflictsDialog
+
+    iguales = [
+        _mod_con_archivo(tmp_path, "a", "mismo\n"),
+        _mod_con_archivo(tmp_path, "b", "mismo\n"),
+    ]
+    distintos = [
+        _mod_con_archivo(tmp_path, "c", "uno\n", "common/y.txt"),
+        _mod_con_archivo(tmp_path, "d", "otro\n", "common/y.txt"),
+    ]
+    dialogo = ConflictsDialog(None, iguales + distintos)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo._informe is not None)
+
+    dialogo.solo_reales.setChecked(True)
+    esperar(qtbot, lambda: dialogo._reales is not None)
+
+    assert [c.path for c in dialogo._identicos] == ["common/x.txt"]
+    assert [c.path for c in dialogo._reales] == ["common/y.txt"]
+    assert "1 cambian algo" in dialogo.resumen.text()
+    assert "1 son copias identicas" in dialogo.resumen.text()
+
+
+def test_el_diff_se_ensena_al_elegir_un_archivo(qtbot, tmp_path):
+    from loadstone.gui.dialogs import ConflictsDialog
+
+    mods = [
+        _mod_con_archivo(tmp_path, "a", "comun\nvalor = viejo\n"),
+        _mod_con_archivo(tmp_path, "b", "comun\nvalor = nuevo\n"),
+    ]
+    dialogo = ConflictsDialog(None, mods)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo._informe is not None)
+
+    dialogo.vista.setCurrentIndex(1)  # por archivo
+    assert dialogo.tabla.topLevelItemCount() == 1
+    dialogo.tabla.setCurrentItem(dialogo.tabla.topLevelItem(0))
+
+    texto = dialogo.diff.toPlainText()
+    assert "-valor = viejo" in texto
+    assert "+valor = nuevo" in texto
+
+
+def test_un_archivo_identico_lo_dice_en_vez_de_ensenar_un_diff_vacio(qtbot, tmp_path):
+    from loadstone.gui.dialogs import ConflictsDialog
+
+    mods = [
+        _mod_con_archivo(tmp_path, "a", "igual\n"),
+        _mod_con_archivo(tmp_path, "b", "igual\n"),
+    ]
+    dialogo = ConflictsDialog(None, mods)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo._informe is not None)
+
+    dialogo.vista.setCurrentIndex(1)
+    dialogo.tabla.setCurrentItem(dialogo.tabla.topLevelItem(0))
+
+    assert "identico byte a byte" in dialogo.diff.toPlainText()
