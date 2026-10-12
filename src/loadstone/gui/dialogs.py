@@ -302,11 +302,31 @@ class SearchDialog(_BaseDialog):
 
 
 class UpdatesDialog(_BaseDialog):
-    """Compara los mods instalados con el Workshop."""
+    """Compara los mods instalados con el Workshop, y los pone al dia.
 
-    def __init__(self, parent: Any, mods: list[Mod]) -> None:
+    Antes solo comparaba: detectaba lo desactualizado y ensenaba el comando
+    para que alguien lo copiara en una consola. Detectar un problema que el
+    programa sabe resolver y pedirle al usuario que lo resuelva en otra parte
+    es dejar el trabajo a medias, asi que ahora tambien lo descarga.
+
+    `game` y `backend` pueden faltar: el dialogo se puede abrir solo para
+    mirar, y entonces el boton se queda apagado y queda el comando.
+    """
+
+    def __init__(
+        self,
+        parent: Any,
+        mods: list[Mod],
+        game: GameProfile | None = None,
+        backend: Backend | None = None,
+        on_updated: Callable[[], None] | None = None,
+    ) -> None:
         super().__init__(parent, "Actualizaciones disponibles", 940, 560)
         self._mods = mods
+        self._game = game
+        self._backend = backend
+        self._on_updated = on_updated
+        self._ids: list[str] = []
 
         layout = QVBoxLayout(self)
         self.resumen = QLabel("Consultando a Steam...")
@@ -323,10 +343,15 @@ class UpdatesDialog(_BaseDialog):
 
         self.comando = QLineEdit()
         self.comando.setReadOnly(True)
-        self.comando.setPlaceholderText("aqui aparecera el comando para actualizarlos")
+        self.comando.setPlaceholderText("aqui aparecera el equivalente en consola")
+        self.comando.setToolTip("Lo mismo que hace el boton, para guionizarlo")
         layout.addWidget(self.comando)
 
+        self.actualizar_btn = QPushButton("Actualizar")
+        self.actualizar_btn.setEnabled(False)
+        self.actualizar_btn.clicked.connect(self._actualizar)
         botones = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        botones.addButton(self.actualizar_btn, QDialogButtonBox.ButtonRole.AcceptRole)
         botones.rejected.connect(self.reject)
         layout.addWidget(botones)
 
@@ -365,8 +390,40 @@ class UpdatesDialog(_BaseDialog):
                     ids.append(estado.mod.steam_id)
             self.tabla.addTopLevelItem(item)
 
-        if ids:
-            self.comando.setText("loadstone workshop --force " + " ".join(ids))
+        self._ids = list(dict.fromkeys(ids))
+        if self._ids:
+            self.comando.setText("loadstone workshop --force " + " ".join(self._ids))
+            self.actualizar_btn.setText(f"Actualizar los {len(self._ids)}")
+            # Sin juego ni backend no hay donde instalar lo que se baje.
+            self.actualizar_btn.setEnabled(
+                self._game is not None and self._backend is not None
+            )
+
+    def _actualizar(self) -> None:
+        if not self._ids or self._game is None or self._backend is None:
+            return
+        ids, juego, backend = list(self._ids), self._game, self._backend
+        self.actualizar_btn.setEnabled(False)
+        self.run_task(
+            lambda: download_and_install(juego, backend, ids),
+            self._actualizado,
+            busy_text=f"actualizando {len(ids)} mods con SteamCMD...",
+        )
+
+    def _actualizado(self, informe: list[tuple[str, str]]) -> None:
+        correctos = sum(1 for _i, estado in informe if estado.startswith("instalado"))
+        fallos = [f"{i}: {e}" for i, e in informe if not e.startswith("instalado")]
+        texto = f"{correctos} de {len(informe)} actualizados."
+        if fallos:
+            detalle = "\n".join(fallos[:10])
+            texto += f"\n\nNo se pudieron bajar:\n{detalle}"
+        QMessageBox.information(self, "Actualizacion terminada", texto)
+        if self._on_updated is not None:
+            self._on_updated()
+        if correctos:
+            self.accept()
+        else:
+            self.actualizar_btn.setEnabled(True)
 
 
 class HistoryDialog(_BaseDialog):

@@ -518,3 +518,41 @@ def test_la_barra_de_reparacion_aparece_cuando_faltan_mods(ventana, mods):
 def test_la_barra_se_esconde_cuando_no_hay_nada_roto(ventana):
     ventana.refresh_issues()
     assert not ventana.repair_bar.isVisibleTo(ventana)
+
+
+def test_actualizaciones_ofrece_actualizar_cuando_hay_juego(qtbot, mods, juego, monkeypatch):
+    """Detectar lo desactualizado sin poder arreglarlo deja el trabajo a medias."""
+    from loadstone.core.updates import UpdateStatus
+
+    estados = [
+        UpdateStatus(mod=mods[0], state=UpdateState.OUTDATED, reason="hay version nueva"),
+        UpdateStatus(mod=mods[1], state=UpdateState.UP_TO_DATE, reason="al dia"),
+    ]
+    monkeypatch.setattr("loadstone.gui.dialogs.check_updates", lambda _m: estados)
+
+    backend = _BackendDeMentira(mods, [])
+    dialogo = UpdatesDialog(None, mods, juego, backend, lambda: None)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo.tabla.topLevelItemCount() > 0)
+
+    # 'Mod Uno' tiene steam_id; 'Mod Dos' esta al dia y no entra.
+    assert dialogo._ids == ["123456789"]
+    assert dialogo.actualizar_btn.isEnabled()
+    assert dialogo.actualizar_btn.text() == "Actualizar los 1"
+    # Y sigue ensenando el equivalente en consola, para guionizarlo.
+    assert "loadstone workshop --force 123456789" in dialogo.comando.text()
+
+
+def test_sin_backend_solo_se_puede_mirar(qtbot, mods, monkeypatch):
+    from loadstone.core.updates import UpdateStatus
+
+    monkeypatch.setattr(
+        "loadstone.gui.dialogs.check_updates",
+        lambda _m: [UpdateStatus(mod=mods[0], state=UpdateState.OUTDATED, reason="vieja")],
+    )
+    dialogo = UpdatesDialog(None, mods)
+    qtbot.addWidget(dialogo)
+    esperar(qtbot, lambda: dialogo.tabla.topLevelItemCount() > 0)
+
+    assert dialogo._ids == ["123456789"]
+    assert not dialogo.actualizar_btn.isEnabled()

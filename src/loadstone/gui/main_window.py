@@ -1002,7 +1002,13 @@ class MainWindow(QMainWindow):
 
     def open_updates(self) -> None:
         if self._require_game():
-            UpdatesDialog(self, list(self.mods.values())).exec()
+            UpdatesDialog(
+                self,
+                list(self.mods.values()),
+                self._current_game(),
+                self.backend,
+                lambda: self._on_game_changed(self.game_box.currentIndex()),
+            ).exec()
 
     def open_conflicts(self) -> None:
         if not self._require_game() or self.playset is None:
