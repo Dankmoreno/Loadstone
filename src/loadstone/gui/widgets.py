@@ -31,7 +31,14 @@ from PySide6.QtWidgets import (
 from ..core.models import Mod
 from .theme import current_palette
 
-__all__ = ["UID_ROLE", "DetailPanel", "ModListWidget"]
+__all__ = ["AVISO", "UID_ROLE", "DetailPanel", "ModListWidget"]
+
+AVISO = "⚠"
+"""Marca de que falta el contenido de un mod.
+
+Un simbolo y no una letra: sobrevive al truncado del nombre y no depende
+del idioma. Va delante porque el final de la columna se corta.
+"""
 
 UID_ROLE = Qt.ItemDataRole.UserRole
 
@@ -87,6 +94,13 @@ class ModListWidget(QTreeWidget):
     def add_mod(self, mod: Mod | None, uid: str, *, enabled: bool, position: int) -> None:
         nombre = mod.name if mod else f"(desconocido: {uid})"
         version = (mod.version or mod.supported_version or "-") if mod else "-"
+        # El contenido que falta llevaba el aviso solo en el color. Alrededor de
+        # un 8% de los hombres no distingue ese rojo del texto normal, y con 213
+        # filas identicas la informacion desaparecia por completo para ellos.
+        # El simbolo dice lo mismo sin depender de la vista de nadie.
+        falta = mod is None or not mod.on_disk
+        if falta:
+            nombre = f"{AVISO} {nombre}"
         textos = (
             ["", str(position + 1), nombre, version] if self._numbered else [nombre, version]
         )
@@ -102,9 +116,16 @@ class ModListWidget(QTreeWidget):
             item.setFlags(banderas)
 
         columna_nombre = 2 if self._numbered else 0
-        if mod is None or not mod.on_disk:
+        if falta:
             item.setForeground(columna_nombre, QBrush(_rojo()))
+            item.setToolTip(
+                columna_nombre,
+                "El launcher lo lista pero su contenido no esta en disco: "
+                "el juego no lo cargara.",
+            )
         elif self._with_checkboxes and not enabled:
+            # Aqui el color es el refuerzo y no el mensaje: la casilla sin
+            # marcar ya dice que esta desactivado, y eso no es un color.
             item.setForeground(columna_nombre, QBrush(_gris()))
         self.addTopLevelItem(item)
 

@@ -556,3 +556,45 @@ def test_sin_backend_solo_se_puede_mirar(qtbot, mods, monkeypatch):
 
     assert dialogo._ids == ["123456789"]
     assert not dialogo.actualizar_btn.isEnabled()
+
+
+def test_lo_que_falta_se_marca_con_simbolo_y_no_solo_con_color(qtbot, mods):
+    """Un 8% de los hombres no distingue ese rojo; el simbolo no depende de eso."""
+    from loadstone.gui.widgets import AVISO, ModListWidget
+
+    lista = ModListWidget(with_checkboxes=False, numbered=False)
+    qtbot.addWidget(lista)
+
+    sano = mods[0]
+    roto = Mod(uid="x", name="Sin contenido", in_registry=True, on_disk=False)
+    lista.add_mod(sano, sano.uid, enabled=True, position=0)
+    lista.add_mod(roto, roto.uid, enabled=True, position=1)
+
+    assert lista.topLevelItem(0).text(0) == "Mod Uno"
+    assert lista.topLevelItem(1).text(0) == f"{AVISO} Sin contenido"
+    assert "no esta en disco" in lista.topLevelItem(1).toolTip(0)
+
+
+def test_un_mod_desconocido_tambien_se_marca(qtbot):
+    """Un uid del playset que no casa con ningun mod instalado."""
+    from loadstone.gui.widgets import AVISO, ModListWidget
+
+    lista = ModListWidget(with_checkboxes=True, numbered=True)
+    qtbot.addWidget(lista)
+    lista.add_mod(None, "fantasma", enabled=True, position=0)
+
+    assert lista.topLevelItem(0).text(2).startswith(AVISO)
+
+
+def test_el_simbolo_no_estorba_al_filtrar(qtbot):
+    """El prefijo va delante del nombre: buscar por el nombre tiene que seguir yendo."""
+    from loadstone.gui.widgets import ModListWidget
+
+    lista = ModListWidget(with_checkboxes=False, numbered=False)
+    qtbot.addWidget(lista)
+    roto = Mod(uid="x", name="Planetary Diversity", in_registry=True, on_disk=False)
+    lista.add_mod(roto, roto.uid, enabled=True, position=0)
+
+    assert lista.apply_filter("planetary") == 1
+    assert lista.apply_filter("diversity") == 1
+    assert lista.apply_filter("otra cosa") == 0
